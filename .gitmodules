@@ -1,0 +1,6 @@
+[submodule "components/arduino"]
+	path = components/arduino
+	url = git@github.com:liukiti/arduino-esp32.git
+[submodule "components/SX126x-Arduino"]
+	path = components/SX126x-Arduino
+	url = git@github.com:liukiti/SX126x-Arduino.git
