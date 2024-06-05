@@ -12,6 +12,8 @@
 #define PIN_NUM_SWITCH 4
 #define PIN_LED_STATUS_RED  GPIO_NUM_33
 #define PIN_LED_STATUS_GREEN GPIO_NUM_25
+#define PIN_NUM_SDA         27
+#define PIN_NUM_SCL         26
 
 extern LedBicolor *led;
 void setup();

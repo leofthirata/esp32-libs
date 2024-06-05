@@ -3,11 +3,17 @@
 #include "Button.h"
 #include "LedBicolor.hpp"
 #include "led.hpp"
+#include "LIS2DW12Sensor.h"
+#include <Wire.h>
 
-using namespace BiColor;
 uint8_t mac[6];
 static const char* TAG = "main.cpp";
+
+using namespace BiColor;
 LedBicolor *led; 
+
+TwoWire dev_i2c(0);  
+LIS2DW12Sensor Acc(&dev_i2c, LIS2DW12_I2C_ADD_L);
 
 void button_handler (button_queue_t param)
 {
@@ -88,7 +94,11 @@ void button_handler (button_queue_t param)
 void setup()
 {
     Serial.begin(115200);
-            
+
+    dev_i2c.begin(PIN_NUM_SDA, PIN_NUM_SCL, 100000);
+    Acc.begin();
+    Acc.Enable_X();
+
     ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
     ESP_ERROR_CHECK(esp_base_mac_addr_set(mac));
     ESP_LOGW(TAG, "MAC: " MACSTR " ", MAC2STR(mac));
@@ -101,12 +111,23 @@ void setup()
     };
 
     buttonInit(&button);
+    
     led = new LedBicolor();
     led->begin(PIN_LED_STATUS_RED, PIN_LED_STATUS_GREEN);
     BiColor::init();
 }
 
+int32_t accelerometer[3];
+float temp = 0.0;
+
 void loop()
 {
-    vTaskDelay(1000);
+    Acc.Get_X_Axes(accelerometer);
+    ESP_LOGI(TAG, "acc: %ld | %ld | %ld", 
+        accelerometer[0], accelerometer[1], accelerometer[2]);
+
+    Acc.Get_Temperature(&temp);
+    ESP_LOGW(TAG, "temp: %02.2f", temp);
+
+    vTaskDelay(5000);
 }

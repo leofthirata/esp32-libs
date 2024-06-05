@@ -4,3 +4,6 @@
 [submodule "components/SX126x-Arduino"]
 	path = components/SX126x-Arduino
 	url = git@github.com:liukiti/SX126x-Arduino.git
+[submodule "components/LIS2DW12"]
+	path = components/LIS2DW12
+	url = git@github.com:liukiti/LIS2DW12.git
