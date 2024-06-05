@@ -15,6 +15,8 @@
 #define PIN_NUM_SDA         27
 #define PIN_NUM_SCL         26
 
+#define PIN_BAT_ADC_CTRL    GPIO_NUM_15
+
 extern LedBicolor *led;
 void setup();
 void loop();

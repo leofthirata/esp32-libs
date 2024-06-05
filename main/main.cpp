@@ -5,6 +5,8 @@
 #include "led.hpp"
 #include "LIS2DW12Sensor.h"
 #include <Wire.h>
+#include "adc.hpp"
+#include "freertos/task.h"
 
 uint8_t mac[6];
 static const char* TAG = "main.cpp";
@@ -115,6 +117,7 @@ void setup()
     led = new LedBicolor();
     led->begin(PIN_LED_STATUS_RED, PIN_LED_STATUS_GREEN);
     BiColor::init();
+    xTaskCreatePinnedToCore(adcTask, "adcTask", 4096, NULL, 5, NULL, 0);
 }
 
 int32_t accelerometer[3];
