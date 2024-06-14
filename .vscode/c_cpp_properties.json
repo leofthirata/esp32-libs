@@ -8,7 +8,8 @@
                 "${workspaceFolder}/../../home/dev/esp/idf/**",
                 "${workspaceFolder}/../../home/dev/esp/idf/components/**",
                 "components/**",
-                "${workspaceFolder}/managed_components/**"
+                "${workspaceFolder}/managed_components/**",
+                "${workspaceFolder}/../../home/dev/esp/idf/examples/system/console/advanced/components/**"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

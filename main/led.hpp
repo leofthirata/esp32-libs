@@ -3,11 +3,11 @@
 
 #include "main.h"
 
-namespace BiColor
+namespace BiColorStatus
 {
 enum class State
 {
-    INIT,
+    TURN_ON,
     BAT_FULL,
     BAT_CHARGING,
     BAT_ERROR,
@@ -20,6 +20,7 @@ enum class State
 };
 
 void init();
+void turnOn();
 void batCharged();
 void batCharging();
 void batError();

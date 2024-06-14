@@ -1,13 +1,16 @@
 #include "led.hpp"
+#include "LedBicolor.hpp"
 
-namespace BiColor
+namespace BiColorStatus
 {
+
+LedBicolor *led;
 bool pop = false;
 uint32_t lastColor = 0x00;
 
 static void updateLedBicolor(State state)
 {
-    static State last_state = State::INIT;
+    static State last_state = State::TURN_ON;
     if (pop)
     {
         led->pop();
@@ -17,10 +20,10 @@ static void updateLedBicolor(State state)
     switch (state)
     {
 
-    case State::INIT:
+    case State::TURN_ON:
     {
         led->blink(Color::ORANGE, 1000);
-        last_state = State::INIT;
+        last_state = State::TURN_ON;
         break;
     }
 
@@ -92,7 +95,14 @@ static void updateLedBicolor(State state)
 
 void init()
 {
-    updateLedBicolor(State::INIT);
+    led = new LedBicolor();
+    led->begin(PIN_LED_STATUS_RED, PIN_LED_STATUS_GREEN);
+    led->color(NONE);
+}
+
+void turnOn()
+{
+    updateLedBicolor(State::TURN_ON);
 }
 
 void batCharged()

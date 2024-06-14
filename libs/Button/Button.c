@@ -141,7 +141,7 @@ esp_err_t buttonInit(button_init_t* param)
     //create a queue to handle gpio event from isr
     button_evt_queue = xQueueCreate(10, sizeof(button_param_t));
     //start gpio task
-    xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL);
+	xTaskCreate(button_task, "button_task", 3072, NULL, 10, NULL);
 
     //install gpio isr service
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
