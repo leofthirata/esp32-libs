@@ -27,6 +27,7 @@ typedef enum
 typedef struct {
 	uint8_t buttonPin;
 	buttonState_t buttonState;
+	buttonState_t buttonPrev;
 }button_queue_t;
 
 typedef void (*buttonHandler)(button_queue_t);

@@ -31,7 +31,7 @@
 #define SCHED_MAX_EVENT_DATA_SIZE APP_TIMER_SCHED_EVENT_DATA_SIZE /**< Maximum size of scheduler events. */
 #define SCHED_QUEUE_SIZE 60										  /**< Maximum number of events in the scheduler queue. */
 
-#define LORA_ID (0xFD0001)           // max: 16.777.215
+#define LORA_ID (0xD59F80)           // 14.000.000
 
 // Define LoRa parameters
 
@@ -46,6 +46,11 @@
 
 #define RX_TIMEOUT_VALUE 3000
 #define TX_TIMEOUT_VALUE 3000
+
+#define LRW_POS_PORT		5
+#define LRW_STATUS_PORT		5
+#define LRW_CMD_PORT		57
+
 
 #pragma pack(1)
 
@@ -105,6 +110,8 @@ typedef struct
 	uint16_t bleAdvTime;
     uint8_t bleMac[6];
     uint8_t P2PCount;
+    int32_t acc[3];
+    float temp;
 } Isca_t;
 
 #pragma pack()

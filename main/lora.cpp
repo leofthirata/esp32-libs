@@ -4,6 +4,7 @@
 #include "loraEvents.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "stateMachine.hpp"
 
 uint8_t nodeDeviceEUI[8] = {0x00, 0x95, 0x64, 0x1F, 0xDA, 0x91, 0x19, 0x0B};
 uint8_t nodeAppEUI[8] = {0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x02, 0x01, 0xE1};
@@ -22,16 +23,16 @@ static TaskHandle_t xTaskToNotify = NULL;
 
 static uint8_t m_lora_app_data_buffer[LORAWAN_APP_DATA_BUFF_SIZE];			  ///< Lora user application data buffer.
 static lmh_app_data_t m_lora_app_data = {m_lora_app_data_buffer, 0, 0, 0, 0}; ///< Lora user application data structure.
-
+static lorawanTXParams_t lorawanTXParams;
 
 static void lorawan_has_joined_handler(void);
 static void lorawan_confirm_class_handler(DeviceClass_t Class);
 static void lorawan_join_failed_handler(void);
-static void lorawanTX(void);
+static void lorawanTX(Isca_t *m_config);
 static void lorawanRX(lmh_app_data_t *app_data);
 
 /**@brief Structure containing LoRaWan parameters, needed for lmh_init() */
-static lmh_param_t lora_param_init = {LORAWAN_ADR_ON, DR_2, LORAWAN_PUBLIC_NETWORK, JOINREQ_NBTRIALS, LORAWAN_DEFAULT_TX_POWER, LORAWAN_DUTYCYCLE_OFF};
+static lmh_param_t lora_param_init = {LORAWAN_ADR_ON, DR_2, LORAWAN_PUBLIC_NETWORK, JOINREQ_NBTRIALS, LORAWAN_DEFAULT_TX_POWER, LORAWAN_DUTYCYCLE_OFF, &lorawanTXParams};
 
 /**@brief Structure containing LoRaWan callback functions, needed for lmh_init() */
 static lmh_callback_t lora_callbacks = {BoardGetBatteryLevel, BoardGetUniqueId, BoardGetRandomSeed,
@@ -41,16 +42,15 @@ static lmh_callback_t lora_callbacks = {BoardGetBatteryLevel, BoardGetUniqueId, 
 
 static const char *TAG = "LoRa";
 
-
+static const LoRa_Queue_t p2pElement = QUEUE_SEND_P2P;
+static const LoRa_Queue_t lrwElement = QUEUE_SEND_LRW;
 void queueLRW()
 {
-	LoRa_Queue_t lrwElement = QUEUE_SEND_LRW;
 	xQueueSend(xQueueLoRa, &lrwElement, 0);
 }
 
 void queueP2P()
 {
-	LoRa_Queue_t p2pElement = QUEUE_SEND_P2P;
 	xQueueSend(xQueueLoRa, &p2pElement, 0);
 }
 
@@ -112,6 +112,51 @@ const char* printLoRaStateMachineState(LoRa_SM_t _status)
 			return "LORA_SM_LRW_RX_ERROR";
 		default:
 			return "UNKNOW STATUS";
+	}
+}
+
+const char* getCMDString(CommandLRWDict_t command)
+{
+	switch(command)
+	{
+	case EMERGENCY:
+		return "EMERGENCY";
+	case BLUETOOTH:
+		return "BLUETOOTH";
+	case STOCK_MODE:
+		return "STOCK_MODE";
+	case SET_OUTPUT:
+		return "SET_OUTPUT";
+	case DO_RESET:
+		return "DO_RESET";
+	case BLE_POWER:
+		return "BLE_POWER";
+	case BLE_TIME:
+		return "BLE_TIME";
+	case ALL_TIMES:
+		return "ALL_TIMES";
+	case GET_STATUS:
+		return "GET_STATUS";
+	case LED:
+		return "LED";
+	case P2P_MOV_NOR:
+		return "P2P_MOV_NOR";
+	case P2P_MOV_EMER:
+		return "P2P_MOV_EMER";
+	case P2P_STP_NOR:
+		return "P2P_STP_NOR";
+	case P2P_STP_EMER:
+		return "P2P_STP_EMER";
+	case LRW_MOV_NOR:
+		return "LRW_MOV_NOR";
+	case LRW_MOV_EMER:
+		return "LRW_MOV_EMER";
+	case LRW_STP_NOR:
+		return "LRW_STP_NOR";
+	case LRW_STP_EMER:
+		return "LRW_STP_EMER";
+	default:
+		return "unknow";
 	}
 }
 
@@ -227,11 +272,11 @@ void p2pRX(Isca_t *config)
 
 				if (commandReceived.param.loraEmergencyCommand)
 				{
-					//enterEmergency();
+					enterEmergency();
 				}
 				else
 				{
-					//exitEmergency();
+					exitEmergency();
 				}
 
 			}
@@ -280,6 +325,8 @@ void p2pRXError()
 
 void lrwTXDone()
 {
+	ESP_LOGW("LoRa", "UpLinkCounter: %ld | Channel: %d | Lenght: %d", 
+		lorawanTXParams.UpLinkCounter, lorawanTXParams.channel, lorawanTXParams.PktLen);
 }
 
 void lrwTXTimeout(timeoutType_t type)
@@ -336,8 +383,10 @@ static void lorawan_confirm_class_handler(DeviceClass_t Class)
 	lmh_send(&m_lora_app_data, LMH_UNCONFIRMED_MSG);
 }
 
-static void lorawanTX(void)
+static void lorawanTX(Isca_t *m_config)
 {
+	static uint32_t count = 0;
+
 	MibRequestConfirm_t mibReq;
 	mibReq.Type = MIB_PUBLIC_NETWORK;
 	mibReq.Param.EnablePublicNetwork = true;
@@ -351,26 +400,38 @@ static void lorawanTX(void)
 	}
 
 	uint32_t i = 0;
-	m_lora_app_data.port = LORAWAN_APP_PORT;
-	m_lora_app_data.buffer[i++] = 'H';
-	m_lora_app_data.buffer[i++] = 'e';
-	m_lora_app_data.buffer[i++] = 'l';
-	m_lora_app_data.buffer[i++] = 'l';
-	m_lora_app_data.buffer[i++] = 'o';
-	m_lora_app_data.buffer[i++] = ' ';
-	m_lora_app_data.buffer[i++] = 'w';
-	m_lora_app_data.buffer[i++] = 'o';
-	m_lora_app_data.buffer[i++] = 'r';
-	m_lora_app_data.buffer[i++] = 'l';
-	m_lora_app_data.buffer[i++] = 'd';
-	m_lora_app_data.buffer[i++] = '!';
-	m_lora_app_data.buffsize = i;
+	memset(m_lora_app_data_buffer, 0, sizeof(m_lora_app_data_buffer));
+	m_lora_app_data.port = LRW_POS_PORT;
+	m_lora_app_data.buffer[0] = m_config->lrwProtocol;
+	m_lora_app_data.buffer[1] = (m_config->loraId >> 16) & 0xFF;
+	m_lora_app_data.buffer[2] = (m_config->loraId >> 8) & 0xFF;
+	m_lora_app_data.buffer[3] = m_config->loraId & 0xFF;
+	m_lora_app_data.buffer[4] = m_config->temperatureCelsius;
+	m_lora_app_data.buffer[5] = (uint8_t)((m_config->batteryMiliVolts & 0xFF00)>>8);
+	m_lora_app_data.buffer[6] = (uint8_t)(m_config->batteryMiliVolts & 0x00FF);
+	m_lora_app_data.buffer[7] = m_config->flags.asArray[0];
+	m_lora_app_data.buffer[8] = m_config->flags.asArray[1];
+	m_lora_app_data.buffsize = 9;
 
 	lmh_error_status error = lmh_send(&m_lora_app_data, LMH_UNCONFIRMED_MSG);
 	if (error == LMH_SUCCESS)
-	{
+	{	
+		char payload[256] = {'0'};
+		for(int i = 0; i < m_lora_app_data.buffsize; i++)
+		{
+			sprintf(payload + strlen(payload), "%02X", m_lora_app_data.buffer[i]);
+		}
+
+		ESP_LOGW(TAG, "LRW SENT: %s", payload);
 	}
-	Serial.printf("lmh_send result %d\n", error);
+	//Serial.printf("lmh_send result %d\n", error);
+	printf("[LORA] PARSE TX LRW Protocol Version: %02X | ", m_lora_app_data.buffer[0]);
+	printf("LoRaID: %02X %02X %02X | ", m_lora_app_data.buffer[1], m_lora_app_data.buffer[2], m_lora_app_data.buffer[3]);
+	printf("Temp: 0x%02X = %d | ", m_lora_app_data.buffer[4], m_lora_app_data.buffer[4]);
+	printf("Battery: 0x%04X = %d mV | ", m_config->batteryMiliVolts, m_config->batteryMiliVolts);
+	printf("Flags: %02X %02X\r\n", m_lora_app_data.buffer[7], m_lora_app_data.buffer[8]);
+
+	memset(m_lora_app_data_buffer, 0, sizeof(m_lora_app_data_buffer));
 }
 
 /**@brief Function for handling LoRaWan received data from Gateway
@@ -379,9 +440,12 @@ static void lorawanTX(void)
  */
 static void lorawanRX(lmh_app_data_t *app_data)
 {
-	Serial.printf("LoRa Packet received on port %d, size:%d, rssi:%d, snr:%d\n",
+	Serial.printf("[LORA] LRW downlink received port:%d, size:%d, rssi:%d, snr:%d\n",
 				  app_data->port, app_data->buffsize, app_data->rssi, app_data->snr);
-
+	for (uint8_t i = 0; i < app_data->buffsize; i++)
+		printf(" %02X ", *(app_data->buffer + i));
+	printf("}\r\n");
+	
 	switch (app_data->port)
 	{
 	case 3:
@@ -408,8 +472,298 @@ static void lorawanRX(lmh_app_data_t *app_data)
 		}
 		break;
 
-	case LORAWAN_APP_PORT:
-		// YOUR_JOB: Take action on received data
+	case LRW_CMD_PORT:
+	{
+
+		uint8_t pktCounter = 0;
+		bool error = false;
+		if(*(app_data->buffer) == CMD_LRW_HEADER)
+		{
+			pktCounter = 1;
+			while(pktCounter < (app_data->buffsize-1) && error == false)
+			{
+				switch(*(app_data->buffer + pktCounter))
+				{
+				case EMERGENCY:
+					if(app_data->buffsize - (pktCounter+1) >= CMD_PARAM_SIZE_EMER)
+					{
+
+						if(*(app_data->buffer + pktCounter+1))
+							enterEmergency();
+						else
+							exitEmergency();
+						pktCounter+= CMD_PARAM_SIZE_EMER;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no Emergency Param\r\n");
+						error = 1;
+					}
+					break;
+
+				case BLUETOOTH:
+					if(app_data->buffsize - (pktCounter+1) >= CMD_PARAM_SIZE_BLE)
+					{
+						if(*(app_data->buffer + pktCounter+1))
+							turnOnBLE();
+						else
+							turnOffBLE();
+						pktCounter+= CMD_PARAM_SIZE_BLE;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no BLE Param\r\n");
+						error = 1;
+					}
+					break;
+
+				case STOCK_MODE:
+					if(app_data->buffsize - (pktCounter+1) >= CMD_PARAM_SIZE_STOCK)
+					{
+						if(*(app_data->buffer + pktCounter+1))
+							enterStockMode();
+						pktCounter+= CMD_PARAM_SIZE_STOCK;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no BLE Param\r\n");
+						error = 1;
+					}
+					break;
+
+				case SET_OUTPUT:
+					if(app_data->buffsize - (pktCounter+1) >= CMD_PARAM_SIZE_OUTPUT)
+					{
+						if(*(app_data->buffer + pktCounter+1))
+							turnOnOutput();
+						else
+							turnOffOutput();
+						pktCounter+= CMD_PARAM_SIZE_OUTPUT;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no OUTPUT Param\r\n");
+						error = 1;
+					}
+					break;
+
+				case DO_RESET:
+					if(app_data->buffsize - (pktCounter+1) >= CMD_PARAM_SIZE_RESET)
+					{
+						if(*(app_data->buffer + pktCounter+1))
+							resetRequest();
+						pktCounter+= CMD_PARAM_SIZE_RESET;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no RESET Param\r\n");
+						error = 1;
+					}
+					break;
+
+				case BLE_POWER:
+					if(app_data->buffsize - (pktCounter+1) >= CMD_PARAM_SIZE_BLE_POWER)
+					{
+						if(*(app_data->buffer + pktCounter+1) >= 0 &&  *(app_data->buffer + pktCounter+1) <= 31)
+							//changeBLEPower(rxDataLRW.payload[pktCounter+1]);
+							changeBLEPower();
+						else
+							printf("[LORA] Warning! Not a valid BLE Power\r\n");
+						pktCounter+= CMD_PARAM_SIZE_BLE_POWER;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no BLE Power Param\r\n");
+						error = 1;
+					}
+					break;
+
+				case BLE_TIME:
+					if(app_data->buffsize - (pktCounter+1) >= CMD_PARAM_SIZE_BLE_TIME)
+					{
+						if(*(app_data->buffer + pktCounter+1) >= 0 &&  *(app_data->buffer + pktCounter+1) <= 31)
+							//changeBLETime(rxDataLRW.payload[pktCounter+1]);
+							changeBLETime();
+						else
+							printf("[LORA] Warning! Not a valid BLE Time\r\n");
+						pktCounter+= CMD_PARAM_SIZE_BLE_TIME;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no BLE Time Param\r\n");
+						error = 1;
+					}
+					break;
+
+				case ALL_TIMES:
+					if(app_data->buffsize - (pktCounter+1) >= CMD_PARAM_SIZE_ALL_TIMES)
+					{
+						uint32_t LoRaTimesArray[8] = {};
+						uint32_t *p_LoRaTimesArray = &LoRaTimesArray[0];
+
+						for(int i = 0; i < 20; i+=5)
+						{
+							*p_LoRaTimesArray |= *(app_data->buffer + pktCounter + i + 1) << 12;
+							*p_LoRaTimesArray |= *(app_data->buffer + pktCounter + i + 2) << 4;
+							*p_LoRaTimesArray |= (*(app_data->buffer + pktCounter + i + 3) & 0xF0) >> 4;
+
+							p_LoRaTimesArray++;
+
+							*p_LoRaTimesArray |= (*(app_data->buffer + pktCounter + i + 3) & 0x0F) << 16;
+							*p_LoRaTimesArray |= *(app_data->buffer + pktCounter + i + 4) << 8;
+							*p_LoRaTimesArray |= (*(app_data->buffer + pktCounter + i + 5));
+
+							p_LoRaTimesArray++;
+						}
+
+						changeLoRaTimes(&LoRaTimesArray[0]);
+						pktCounter+= CMD_PARAM_SIZE_ALL_TIMES;
+
+					}
+					else
+					{
+						printf("[LORA] Times Param size not valid or not present! \r\n");
+						error = 1;
+					}
+
+					break;
+
+				case GET_STATUS:
+					if(app_data->buffsize - (pktCounter+1) >= CMD_PARAM_SIZE_GET_STATUS)
+					{
+						if(*(app_data->buffer + pktCounter + 1))
+							sendStatus();
+						pktCounter+= CMD_PARAM_SIZE_GET_STATUS;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no GET_STATUS Param\r\n");
+						error = 1;
+					}
+					break;
+
+				case LED:
+					if(app_data->buffsize - (pktCounter+1) >= CMD_PARAM_SIZE_LED)
+					{
+						if(*(app_data->buffer + pktCounter + 1))
+							enableLed();
+						else
+							disableLed();
+						pktCounter+= CMD_PARAM_SIZE_LED;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no LED Param\r\n");
+						error = 1;
+					}
+					break;
+
+				case P2P_MOV_NOR:
+				case P2P_MOV_EMER:
+				case LRW_MOV_NOR:
+				case LRW_MOV_EMER:
+					if(app_data->buffsize - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
+					{
+						uint32_t dummy = 0;
+						dummy = (*(app_data->buffer + pktCounter + 1) & 0x0F) << 16;
+						dummy |= *(app_data->buffer + pktCounter + 2)  << 8;
+						dummy |= *(app_data->buffer + pktCounter + 3);
+						printf("[LORA] Requested Change to %s:%ld\r\n", getCMDString((CommandLRWDict_t)*(app_data->buffer + pktCounter)),dummy);
+						printf("WARNING! Feature not implemented\r\n");
+						pktCounter+= TIME_CMD_PARAM_SIZE;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no %s parameter\r\n",  getCMDString((CommandLRWDict_t)*(app_data->buffer + pktCounter)));
+						error = 1;
+					}
+					break;
+
+				case P2P_STP_NOR:
+					if(app_data->buffsize - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
+					{
+						uint32_t dummy = 0;
+						dummy = (*(app_data->buffer + pktCounter + 1) & 0x0F) << 16;
+						dummy |= *(app_data->buffer + pktCounter + 2)  << 8;
+						dummy |= *(app_data->buffer + pktCounter + 3);
+						printf("[LORA] Changed P2P SN to %ld\r\n", dummy);
+						changeP2P_SN_Time(dummy);
+						pktCounter+= TIME_CMD_PARAM_SIZE;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no P2P_SN Param\r\n");
+						error = 1;
+					}
+					break;
+				case P2P_STP_EMER:
+					if(app_data->buffsize - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
+					{
+						uint32_t dummy = 0;
+						dummy = (*(app_data->buffer + pktCounter + 1) & 0x0F) << 16;
+						dummy |= *(app_data->buffer + pktCounter + 2)  << 8;
+						dummy |= *(app_data->buffer + pktCounter + 3);
+						printf("[LORA] Changed P2P SE to %ld\r\n", dummy);
+						changeP2P_SE_Time(dummy);
+						pktCounter+= TIME_CMD_PARAM_SIZE;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no P2P_SE Param\r\n");
+						error = 1;
+					}
+					break;
+				case LRW_STP_NOR:
+					if(app_data->buffsize - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
+					{
+						uint32_t dummy = 0;
+						dummy = (*(app_data->buffer + pktCounter + 1)) << 16;
+						dummy |= *(app_data->buffer + pktCounter + 2)  << 8;
+						dummy |= *(app_data->buffer + pktCounter + 3);
+						printf("[LORA] Changed LRW SN to %ld\r\n", dummy);
+						changeLRW_SN_Time(dummy);
+						pktCounter+= TIME_CMD_PARAM_SIZE;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no LRW_SN Param\r\n");
+						error = 1;
+					}
+					break;
+
+				case LRW_STP_EMER:
+					if(app_data->buffsize - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
+					{
+						uint32_t dummy = 0;
+						dummy = (*(app_data->buffer + pktCounter + 1)) << 16;
+						dummy |= *(app_data->buffer + pktCounter + 2)  << 8;
+						dummy |= *(app_data->buffer + pktCounter + 3);
+						printf("[LORA] Changed LRW SE to %ld\r\n", dummy);
+						changeLRW_SE_Time(dummy);
+						pktCounter+= TIME_CMD_PARAM_SIZE;
+					}
+					else
+					{
+						printf("[LORA] Warning! There's no LRW_SE Param\r\n");
+						error = 1;
+					}
+					break;
+
+				default:
+					printf("[LORA] Warning! Not a valid command. Aborting!\r\n");
+					error = 1;
+					break;
+
+				}
+			}
+			if(error)
+				printf("[LORA] Error Parsing data! \r\n");
+		}
+		else
+		{
+			printf("[LORA] Warning! Not a LRW command!\r\n");
+		}
+	}
 		break;
 
 	default:
@@ -563,7 +917,7 @@ void loraTask(void* param)
 
 			case LORA_SM_LRW_TX:
 
-				lorawanTX();
+				lorawanTX(config);
 			
 				state_prev = LORA_SM_LRW_TX;
 				state = LORA_SM_WAIT_FOR_EVENT;

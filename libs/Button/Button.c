@@ -68,6 +68,7 @@ static void button_task(void* arg)
 				buttonInfo2cb.buttonPin = io_num.pin;
 				(*io_num.event_handler)(buttonInfo2cb);
 				esp_timer_start_once(io_num.m_hold_timer, holdTime);
+				buttonInfo2cb.buttonPrev = BTN_PRESSED;
 				break;
 			}
 			case BTN_RELEASED: 
@@ -79,6 +80,7 @@ static void button_task(void* arg)
 					buttonInfo2cb.buttonState = BTN_RELEASED;
 					buttonInfo2cb.buttonPin = io_num.pin;
 					(*io_num.event_handler)(buttonInfo2cb);
+					buttonInfo2cb.buttonPrev = BTN_RELEASED;
 				}
 				else 
 				{
@@ -92,7 +94,7 @@ static void button_task(void* arg)
 				buttonInfo2cb.buttonState = BTN_HOLD;
 				buttonInfo2cb.buttonPin = io_num.pin;
 				(*io_num.event_handler)(buttonInfo2cb);
-
+				buttonInfo2cb.buttonPrev = BTN_HOLD;
 				break;
 			}
 
