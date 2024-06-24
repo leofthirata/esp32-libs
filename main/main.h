@@ -106,6 +106,10 @@ typedef struct
 	uint32_t lrwMovEmer  : 20;
 	uint32_t lrwStpNorm : 20;
 	uint32_t lrwStpEmer  : 20;
+    uint32_t gsmMovNorm : 20;
+	uint32_t gsmMovEmer  : 20;
+	uint32_t gsmStpNorm : 20;
+	uint32_t gsmStpEmer  : 20;
 	uint8_t blePower;
 	uint16_t bleAdvTime;
     uint8_t bleMac[6];

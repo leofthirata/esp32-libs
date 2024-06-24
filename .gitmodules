@@ -7,3 +7,6 @@
 [submodule "components/LIS2DW12"]
 	path = components/LIS2DW12
 	url = git@github.com:liukiti/LIS2DW12.git
+[submodule "libs/AT21CS01"]
+	path = libs/AT21CS01
+	url = git@github.com:liukiti/ESP32_AT21CS01.git
