@@ -116,6 +116,12 @@ typedef struct
     uint8_t P2PCount;
     int32_t acc[3];
     float temp;
+    uint8_t nodeDeviceEUI[8];
+    uint8_t nodeAppEUI[8];
+    uint8_t nodeAppKey[8];
+    uint32_t nodeDevAddr;
+    uint8_t nodeNwsKey[16];
+    uint8_t nodeAppsKey[16];
 } Isca_t;
 
 #pragma pack()

@@ -28,25 +28,31 @@ void otpInit(void *parameter)
 
 void otpRead(OTPMemoryUnion_t *memoryRead)
 {
-    memset(memoryRead->asArray, 0, sizeof(memoryRead->asArray));
+    
+    uint8_t readFromMemory[72];
+    memset(readFromMemory, 0, sizeof(readFromMemory));
+    OTPMemoryUnion_t parseData;
+
+    //memset(memoryRead->asArray, 0, sizeof(memoryRead->asArray));
     for(int k = 0; k < 9; k++)
     {
-        at21cs01_ReadFromAddress(k*8, (memoryRead->asArray+k*8), 8);
-        uint8_t crc_cal = dallas_crc8((memoryRead->asArray+k*8), 7);
-        if(crc_cal != *(memoryRead->asArray+ k * 8 + 7))
+        at21cs01_ReadFromAddress(k*8, (&readFromMemory[k*8]), 8);
+        uint8_t crc_cal = dallas_crc8(&(readFromMemory[k*8]), 7);
+        if(crc_cal != (readFromMemory[k * 8 + 7]))
         {
             printf("corrupted data %d, trying again\r\n", k);
             k--;
             delay(30);
         }
     }
-    OTPMemoryUnion_t parseData;
 
     for(int i = 0; i < 8; i++)
     {
-        memcpy(&parseData.asArray[i*7], (memoryRead->asArray + i*8), 7);
+        memcpy(&parseData.asArray[i*7], (&readFromMemory[i*8]), 7);
     }
-    memcpy(&parseData.asArray[56], memoryRead->asArray + 64, 2);
+    memcpy(&parseData.asArray[56], &readFromMemory[64], 2);
+
+    memcpy(memoryRead, parseData.asArray, sizeof(parseData.asArray));
 
     printf("    [PARSE] memVer: %d | hwVer: %d | prefixSN: %d \r\n", parseData.asParam.memVer,
             parseData.asParam.hwVer, parseData.asParam.prefixSN);

@@ -20,6 +20,7 @@
 #include <rom/rtc.h>
 
 #include "otp.hpp"
+#include "esp_log.h"
 uint8_t mac[6];
 static const char* TAG = "main.cpp";
 
@@ -119,11 +120,23 @@ void setup()
      */
     repl_config.prompt = PROMPT_STR ">";
     repl_config.max_cmdline_length = 1024;
-
+    memset(&config, 0, sizeof(config));
     //config.loraId = LORA_ID; 
     otpInit(NULL);
     otpRead(&readMemory);
 
+    config.loraId = (readMemory.asParam.loraID[0]<<16) + (readMemory.asParam.loraID[1]<<8) + (readMemory.asParam.loraID[2]);
+    memcpy(config.nodeDeviceEUI, readMemory.asParam.devEUI, 8);
+    memcpy(config.nodeAppEUI, readMemory.asParam.appEUI, 8);
+    config.nodeDevAddr = (readMemory.asParam.devAddr[0]<<24) + (readMemory.asParam.devAddr[1]<<16) +
+        (readMemory.asParam.devAddr[2]<<8) + readMemory.asParam.devAddr[3];
+    memcpy(config.nodeNwsKey, readMemory.asParam.nwSKey, 16);
+    memcpy(config.nodeAppsKey, readMemory.asParam.appSKey, 16);
+    printf("loraID: %ld | devAddress: %08lX\r\n", config.loraId,config.nodeDevAddr);
+    ESP_LOG_BUFFER_HEX("deviceEUI", config.nodeDeviceEUI, sizeof(config.nodeDeviceEUI));
+    ESP_LOG_BUFFER_HEX("appEUI", config.nodeAppEUI, sizeof(config.nodeAppEUI));
+    ESP_LOG_BUFFER_HEX("nwSKey", config.nodeNwsKey, sizeof(config.nodeNwsKey));
+    ESP_LOG_BUFFER_HEX("appSKey", config.nodeAppsKey, sizeof(config.nodeAppsKey));
 
     ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
     ESP_ERROR_CHECK(esp_base_mac_addr_set(mac));
@@ -144,7 +157,7 @@ void setup()
     xTaskCreatePinnedToCore(sensorsTask, "sensorsTask", 4096, (void*) &config, 5, NULL, 0);
     xTaskCreatePinnedToCore(loraTask, "loraTask", 4096, (void*) &config, 5, NULL, 0);
     xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &config, 5, NULL, 0);
-    xTaskCreate(modem_task_function, "modem_tsk", 8192, NULL, uxTaskPriorityGet(NULL), NULL);
+    //xTaskCreate(modem_task_function, "modem_tsk", 8192, NULL, uxTaskPriorityGet(NULL), NULL);
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
 

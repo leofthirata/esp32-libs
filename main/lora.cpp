@@ -6,13 +6,6 @@
 #include "freertos/task.h"
 #include "stateMachine.hpp"
 
-uint8_t nodeDeviceEUI[8] = {0x00, 0x95, 0x64, 0x1F, 0xDA, 0x91, 0x19, 0x0B};
-uint8_t nodeAppEUI[8] = {0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x02, 0x01, 0xE1};
-uint8_t nodeAppKey[16] = {0x07, 0xC0, 0x82, 0x0C, 0x30, 0xB9, 0x08, 0x70, 0x0C, 0x0F, 0x70, 0x06, 0x00, 0xB0, 0xBE, 0x09};
-uint32_t nodeDevAddr = 0x260116F8;
-uint8_t nodeNwsKey[16] = {0x7E, 0xAC, 0xE2, 0x55, 0xB8, 0xA5, 0xE2, 0x69, 0x91, 0x51, 0x96, 0x06, 0x47, 0x56, 0x9D, 0x23};
-uint8_t nodeAppsKey[16] = {0xFB, 0xAC, 0xB6, 0x47, 0xF3, 0x58, 0x45, 0xC7, 0x50, 0x7D, 0xBF, 0x16, 0x8B, 0xA8, 0xC1, 0x7C};
-
 hw_config hwConfig;
 QueueHandle_t xQueueLoRa;
 
@@ -385,8 +378,6 @@ static void lorawan_confirm_class_handler(DeviceClass_t Class)
 
 static void lorawanTX(Isca_t *m_config)
 {
-	static uint32_t count = 0;
-
 	MibRequestConfirm_t mibReq;
 	mibReq.Type = MIB_PUBLIC_NETWORK;
 	mibReq.Param.EnablePublicNetwork = true;
@@ -399,7 +390,6 @@ static void lorawanTX(Isca_t *m_config)
 		return;
 	}
 
-	uint32_t i = 0;
 	memset(m_lora_app_data_buffer, 0, sizeof(m_lora_app_data_buffer));
 	m_lora_app_data.port = LRW_POS_PORT;
 	m_lora_app_data.buffer[0] = m_config->lrwProtocol;
@@ -802,12 +792,12 @@ void loraTask(void* param)
 	}
 
 	// Setup the EUIs and Keys
-	lmh_setDevEui(nodeDeviceEUI);
-	lmh_setAppEui(nodeAppEUI);
-	lmh_setAppKey(nodeAppKey);
-	lmh_setNwkSKey(nodeNwsKey);
-	lmh_setAppSKey(nodeAppsKey);
-	lmh_setDevAddr(nodeDevAddr);
+	lmh_setDevEui(config->nodeDeviceEUI);
+	lmh_setAppEui(config->nodeAppEUI);
+	lmh_setAppKey(config->nodeAppKey);
+	lmh_setNwkSKey(config->nodeNwsKey);
+	lmh_setAppSKey(config->nodeAppsKey);
+	lmh_setDevAddr(config->nodeDevAddr);
 
 	p2p.TxDone = p2pTXDone;
 	p2p.TxTimeout = p2pTXTimeout;
