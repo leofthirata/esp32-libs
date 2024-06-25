@@ -94,10 +94,8 @@ typedef struct
     uint8_t fwVerProtocol;
     uint8_t lrwProtocol;
     uint8_t hwVer;
-    uint32_t lastP2PTick;
-    uint32_t lastLRWTick;
-    uint32_t nextP2PTick;
-    uint32_t nextLRWTick;
+    uint64_t lastP2PTick;
+    uint64_t lastLRWTick;
 	uint32_t p2pMovNorm : 20;
 	uint32_t p2pMovEmer  : 20;
 	uint32_t p2pStpNorm : 20;
