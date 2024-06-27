@@ -44,7 +44,7 @@
 #define LORA_BANDWIDTH 2		// [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: Reserved]
 #define LORA_SPREADING_FACTOR 11 // [SF7..SF12]
 
-#define RX_TIMEOUT_VALUE 3000
+#define P2P_RX_TIMEOUT 3000
 #define TX_TIMEOUT_VALUE 3000
 
 #define LRW_POS_PORT		5
@@ -84,18 +84,55 @@ typedef union
 
 typedef struct
 {
-	FlagsIscaUnion_t flags;
+	//status
+    FlagsIscaUnion_t flags;
     int16_t batteryMiliVolts;
     int8_t temperatureCelsius;
     uint32_t reset;
     uint8_t batteryStatus;
+    uint64_t lastP2PTick;
+    uint64_t lastLRWTick;
+    uint8_t P2PCount;
+    int32_t acc[3];
+    float temp;
+    
+    //otp
+    uint8_t hwVer;
     uint32_t loraId;
+    uint8_t bleMac[6];
+    uint8_t nodeDeviceEUI[8];
+    uint8_t nodeAppEUI[8];
+    uint8_t nodeAppKey[8];
+    uint32_t nodeDevAddr;
+    uint8_t nodeNwsKey[16];
+    uint8_t nodeAppsKey[16];
+
+    //configuration
     char* fwVer;
     uint8_t fwVerProtocol;
     uint8_t lrwProtocol;
-    uint8_t hwVer;
-    uint64_t lastP2PTick;
-    uint64_t lastLRWTick;
+    char apn[64];
+    char gsmUser[64];
+    char gsmPswd[64];
+    uint16_t gsmPort;
+    char gsmServer[64];
+    uint32_t p2pTXFreq;
+    uint32_t p2pRXFreq;
+    uint32_t p2pRXDelay;
+    uint8_t p2pBW;
+    uint8_t p2pSF;
+    uint8_t p2pCR;
+    uint8_t p2pTxPower;
+    uint8_t lrwSF;
+    uint32_t p2pRXTimeout;
+    bool lrwADR;
+    bool lrwConfirmed;
+    uint8_t lrwPosPort;
+    uint8_t lrwCmdPort;
+    uint8_t lrwStaPort;
+    
+	uint8_t blePower;
+	uint16_t bleAdvTime;
 	uint32_t p2pMovNorm : 20;
 	uint32_t p2pMovEmer  : 20;
 	uint32_t p2pStpNorm : 20;
@@ -108,18 +145,6 @@ typedef struct
 	uint32_t gsmMovEmer  : 20;
 	uint32_t gsmStpNorm : 20;
 	uint32_t gsmStpEmer  : 20;
-	uint8_t blePower;
-	uint16_t bleAdvTime;
-    uint8_t bleMac[6];
-    uint8_t P2PCount;
-    int32_t acc[3];
-    float temp;
-    uint8_t nodeDeviceEUI[8];
-    uint8_t nodeAppEUI[8];
-    uint8_t nodeAppKey[8];
-    uint32_t nodeDevAddr;
-    uint8_t nodeNwsKey[16];
-    uint8_t nodeAppsKey[16];
 } Isca_t;
 
 #pragma pack()

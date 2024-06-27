@@ -68,12 +68,14 @@ void button_handler (button_queue_t param)
             if(param.buttonPrev == BTN_PRESSED)
             {
                 BiColorStatus::sendPosition();
-                queueP2P();
+                //queueP2P();
+                esp_event_post(APP_EVENT, APP_EVENT_REQ_P2P_SEND, NULL, 0, 0);
             }
             else
             {
                 BiColorStatus::batError();
-                queueLRW();
+                //queueLRW();
+                esp_event_post(APP_EVENT, APP_EVENT_REQ_LRW_SEND, NULL, 0, 0);
             }
         break;
 
@@ -92,6 +94,19 @@ static void initialize_nvs(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+}
+
+static void app_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data)
+{
+    // Isca_t *m_config = (Isca_t *) event_data;
+    if (event_base == APP_EVENT && event_id == APP_EVENT_QUEUE_P2P_SEND)
+    {
+    }
+    if (event_base == APP_EVENT && event_id == APP_EVENT_QUEUE_LRW_SEND)
+    {
+    }
+
 }
 
 void setup()
@@ -113,7 +128,7 @@ void setup()
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-
+    esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
    
     /* Prompt to be printed before each line.
      * This can be customized, made dynamic, etc.
@@ -137,6 +152,23 @@ void setup()
     ESP_LOG_BUFFER_HEX("appEUI", config.nodeAppEUI, sizeof(config.nodeAppEUI));
     ESP_LOG_BUFFER_HEX("nwSKey", config.nodeNwsKey, sizeof(config.nodeNwsKey));
     ESP_LOG_BUFFER_HEX("appSKey", config.nodeAppsKey, sizeof(config.nodeAppsKey));
+
+
+    config.p2pBW = 2; //500kHz
+    config.p2pCR = 1;
+    config.p2pTxPower = 22;
+    config.p2pSF = 11;
+    config.p2pTXFreq = 903E6;
+    config.p2pRXFreq = 904E6;
+    config.p2pRXTimeout = P2P_RX_TIMEOUT;
+    config.p2pRXDelay = 0;
+
+
+    config.lrwConfirmed = false;
+    config.lrwPosPort = LRW_POS_PORT;
+    config.lrwCmdPort = LRW_CMD_PORT;
+    config.lrwStaPort = LRW_STATUS_PORT;
+    config.lrwADR = false;
 
     ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
     ESP_ERROR_CHECK(esp_base_mac_addr_set(mac));
