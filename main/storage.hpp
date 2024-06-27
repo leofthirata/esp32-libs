@@ -83,13 +83,15 @@ public:
     esp_err_t set_key_u16(nvs_handle_t ns, const char *key, uint16_t *data);
     esp_err_t set_key_u32(nvs_handle_t ns, const char *key, uint32_t *data);
     esp_err_t set_key_u64(nvs_handle_t ns, const char *key, uint64_t *data);
+    esp_err_t set_key_u32_20bits(nvs_handle_t ns, const char *key, uint32_t *data);
     esp_err_t status_set_key(const char *key, void *data);
 
     esp_err_t get_key_u8(nvs_handle_t ns, const char *key, uint8_t *data, size_t size);
     esp_err_t get_key_u16(nvs_handle_t ns, const char *key, uint16_t *data);
     esp_err_t get_key_u32(nvs_handle_t ns, const char *key, uint32_t *data);
     esp_err_t get_key_u64(nvs_handle_t ns, const char *key, uint64_t *data);
-    
+    esp_err_t get_key_u32_20bits(nvs_handle_t ns, const char *key, uint32_t *data);
+
     esp_err_t status_get_key(const char *key, void *data);
     esp_err_t config_set_key(const char *key, void *data);
 

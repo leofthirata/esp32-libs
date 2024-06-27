@@ -170,6 +170,16 @@ esp_err_t Storage::set_key_u64(nvs_handle_t ns, const char *key, uint64_t *data)
     return set_key_u8(ns, key, temp, 8);
 }
 
+esp_err_t Storage::set_key_u32_20bits(nvs_handle_t ns, const char *key, uint32_t *data)
+{
+    uint8_t temp[3];
+    temp[0] = (*data >> 16) & 0x0F;
+    temp[1] = (*data >> 8) & 0xFF;
+    temp[2] = *data & 0xFF;
+
+    return set_key_u8(ns, key, temp, 3);
+}
+
 void Storage::otp_set(Isca_t *otp)
 {
     // set_key_u8(m_otp_nvs, "fwverprotocol", &otp->fwVerProtocol, 1);
@@ -273,6 +283,17 @@ esp_err_t Storage::get_key_u64(nvs_handle_t ns, const char *key, uint64_t *data)
 
     *data = (temp[0] << 56) + (temp[1] << 48) + (temp[2] << 40) + (temp[3] << 32) +
         (temp[4] << 24) + (temp[5] << 16) + (temp[6] << 8) + temp[7];
+
+    return err;
+}
+
+esp_err_t Storage::get_key_u32_20bits(nvs_handle_t ns, const char *key, uint32_t *data)
+{
+    uint8_t temp[3];
+
+    esp_err_t err = get_key_u8(ns, key, temp, 3);
+
+    *data = (temp[0] << 16) + (temp[1] << 8) + (temp[2]);
 
     return err;
 }
@@ -554,25 +575,29 @@ void Storage::ble_lora_gsm_set(Isca_t *config)
     uint32_t temp;
 
     temp = config->p2pMovNorm;
-    set_key_u32(m_config_nvs, "p2pmovnorm", &temp);
+    set_key_u32_20bits(m_config_nvs, "p2pmovnorm", &temp);
     temp = config->p2pMovEmer;
-    set_key_u32(m_config_nvs, "p2pmovemer", &temp);
+    set_key_u32_20bits(m_config_nvs, "p2pmovemer", &temp);
     temp = config->p2pStpNorm;
-    set_key_u32(m_config_nvs, "p2pstpnorm", &temp);
+    set_key_u32_20bits(m_config_nvs, "p2pstpnorm", &temp);
     temp = config->p2pStpEmer;
-    set_key_u32(m_config_nvs, "p2pstpemer", &temp);
+    set_key_u32_20bits(m_config_nvs, "p2pstpemer", &temp);
     temp = config->lrwMovNorm;
-    set_key_u32(m_config_nvs, "lrwmovnorm", &temp);
+    set_key_u32_20bits(m_config_nvs, "lrwmovnorm", &temp);
     temp = config->lrwMovEmer;
-    set_key_u32(m_config_nvs, "lrwmovemer", &temp);
+    set_key_u32_20bits(m_config_nvs, "lrwmovemer", &temp);
+    temp = config->lrwStpNorm;
+    set_key_u32_20bits(m_config_nvs, "lrwstpnorm", &temp);
+    temp = config->lrwStpEmer;
+    set_key_u32_20bits(m_config_nvs, "lrwstpemer", &temp);
     temp = config->gsmMovNorm;
-    set_key_u32(m_config_nvs, "gsmmovnorm", &temp);
+    set_key_u32_20bits(m_config_nvs, "gsmmovnorm", &temp);
     temp = config->gsmMovEmer;
-    set_key_u32(m_config_nvs, "gsmmovemer", &temp);
+    set_key_u32_20bits(m_config_nvs, "gsmmovemer", &temp);
     temp = config->gsmStpNorm;
-    set_key_u32(m_config_nvs, "gsmstpnorm", &temp);
+    set_key_u32_20bits(m_config_nvs, "gsmstpnorm", &temp);
     temp = config->gsmStpEmer;
-    set_key_u32(m_config_nvs, "gsmstpemer", &temp);
+    set_key_u32_20bits(m_config_nvs, "gsmstpemer", &temp);
 }
 
 void Storage::ble_lora_gsm_get(Isca_t *config)
@@ -582,26 +607,30 @@ void Storage::ble_lora_gsm_get(Isca_t *config)
 
     uint32_t temp;
 
-    temp = config->p2pMovNorm;
-    get_key_u32(m_config_nvs, "p2pmovnorm", &temp);
-    temp = config->p2pMovEmer;
-    get_key_u32(m_config_nvs, "p2pmovemer", &temp);
-    temp = config->p2pStpNorm;
-    get_key_u32(m_config_nvs, "p2pstpnorm", &temp);
-    temp = config->p2pStpEmer;
-    get_key_u32(m_config_nvs, "p2pstpemer", &temp);
-    temp = config->lrwMovNorm;
-    get_key_u32(m_config_nvs, "lrwmovnorm", &temp);
-    temp = config->lrwMovEmer;
-    get_key_u32(m_config_nvs, "lrwmovemer", &temp);
-    temp = config->gsmMovNorm;
-    get_key_u32(m_config_nvs, "gsmmovnorm", &temp);
-    temp = config->gsmMovEmer;
-    get_key_u32(m_config_nvs, "gsmmovemer", &temp);
-    temp = config->gsmStpNorm;
-    get_key_u32(m_config_nvs, "gsmstpnorm", &temp);
-    temp = config->gsmStpEmer;
-    get_key_u32(m_config_nvs, "gsmstpemer", &temp);
+    get_key_u32_20bits(m_config_nvs, "p2pmovnorm", &temp);
+    config->p2pMovNorm = temp;
+    get_key_u32_20bits(m_config_nvs, "p2pmovemer", &temp);
+    config->p2pMovEmer = temp;
+    get_key_u32_20bits(m_config_nvs, "p2pstpnorm", &temp);
+    config->p2pStpNorm = temp;
+    get_key_u32_20bits(m_config_nvs, "p2pstpemer", &temp);
+    config->p2pStpEmer = temp;
+    get_key_u32_20bits(m_config_nvs, "lrwmovnorm", &temp);
+    config->lrwMovNorm = temp;
+    get_key_u32_20bits(m_config_nvs, "lrwmovemer", &temp);
+    config->lrwMovEmer = temp;
+    get_key_u32_20bits(m_config_nvs, "lrwstpnorm", &temp);
+    config->lrwStpNorm = temp;
+    get_key_u32_20bits(m_config_nvs, "lrwstpemer", &temp);
+    config->lrwStpEmer = temp;
+    get_key_u32_20bits(m_config_nvs, "gsmmovnorm", &temp);
+    config->gsmMovNorm = temp;
+    get_key_u32_20bits(m_config_nvs, "gsmmovemer", &temp);
+    config->gsmMovEmer = temp;
+    get_key_u32_20bits(m_config_nvs, "gsmstpnorm", &temp);
+    config->gsmStpNorm = temp;
+    get_key_u32_20bits(m_config_nvs, "gsmstpemer", &temp);
+    config->gsmStpEmer = temp;
 }
 
 } // namespace Storage
