@@ -182,8 +182,6 @@ esp_err_t Storage::set_key_u32_20bits(nvs_handle_t ns, const char *key, uint32_t
 
 void Storage::otp_set(Isca_t *otp)
 {
-    // set_key_u8(m_otp_nvs, "fwverprotocol", &otp->fwVerProtocol, 1);
-    // set_key_u8(m_otp_nvs, "lrwprotocol", &otp->lrwProtocol, 1);
     set_key_u8(m_otp_nvs, "hwver", &otp->hwVer, 1);
 
     uint8_t loraId[3];
@@ -208,8 +206,6 @@ void Storage::otp_set(Isca_t *otp)
 
 void Storage::otp_get(Isca_t *otp)
 {
-    // get_key_u8(m_otp_nvs, "fwverprotocol", &otp->fwVerProtocol, 1);
-    // get_key_u8(m_otp_nvs, "lrwprotocol", &otp->lrwProtocol, 1);
     get_key_u8(m_otp_nvs, "hwver", &otp->hwVer, 1);
 
     uint8_t bleMac[6];
@@ -360,13 +356,13 @@ esp_err_t Storage::status_set_key(const char *key, void *data)
     }
     else if (strcmp(key, "acc") == 0)
     {
-        int32_t temp[3];
+        int32_t temp[ACC_MAX_SIZE];
     
         err = nvs_get_blob(m_status_nvs, key, temp, NULL);
         if (err == ESP_ERR_NVS_NOT_FOUND) // ESP_ERR_NVS_NOT_FOUND error occurs if key doesn't exist yet
             ESP_LOGE(key, "not found in NVS, setting key. Error (%s)\n", esp_err_to_name(err));
 
-        err = nvs_set_blob(m_status_nvs, key, data, 3*sizeof(int32_t));
+        err = nvs_set_blob(m_status_nvs, key, data, ACC_MAX_SIZE*sizeof(int32_t));
     }
     else if (strcmp(key, "temp") == 0)
     {
@@ -376,7 +372,7 @@ esp_err_t Storage::status_set_key(const char *key, void *data)
         if (err == ESP_ERR_NVS_NOT_FOUND) // ESP_ERR_NVS_NOT_FOUND error occurs if key doesn't exist yet
             ESP_LOGE(key, "not found in NVS, setting key. Error (%s)\n", esp_err_to_name(err));
 
-        err = nvs_set_blob(m_status_nvs, key, data, 4);
+        err = nvs_set_blob(m_status_nvs, key, data, sizeof(float));
     }
     if (err != ESP_OK) 
     {
@@ -442,14 +438,14 @@ esp_err_t Storage::status_get_key(const char *key, void *data)
     }
     else if (strcmp(key, "acc") == 0)
     {
-        size_t length = 3 * sizeof(int32_t); // length must have the correct key size to avoid ESP_ERR_NVS_INVALID_LENGTH error
-        int32_t temp[3];
+        size_t length = ACC_MAX_SIZE * sizeof(int32_t); // length must have the correct key size to avoid ESP_ERR_NVS_INVALID_LENGTH error
+        int32_t temp[ACC_MAX_SIZE];
         err = nvs_get_blob(m_status_nvs, key, temp, &length);
         memcpy((int32_t *)data, temp, length);
     }
     else if (strcmp(key, "temp") == 0)
     {
-        size_t length = 4;
+        size_t length = sizeof(float);
         float *temp = (float *)data;
 
         err = nvs_get_blob(m_status_nvs, key, temp, &length);
@@ -470,101 +466,75 @@ esp_err_t Storage::status_get_key(const char *key, void *data)
 
 void Storage::config_set(Isca_t *config)
 {
-    // config_set_key("fwver", &config->fwVer);
-    // config_set_key("fwverprot", &config->fwVerProtocol);
-    // config_set_key("lrwprot", &config->lrwProtocol);
-    // config_set_key("apn", config->apn);
-    // config_set_key("gsmuser", config->gsmUser);
-    // config_set_key("gsmpswd", config->gsmPswd);
-    // config_set_key("gsmport", &config->gsmPort);
-    // config_set_key("gsmserver", config->gsmServer);
-    // config_set_key("p2ptxfreq", &config->p2pTXFreq);
-    // config_set_key("p2prxfreq", &config->p2pRXFreq);
-    // config_set_key("p2pbw", &config->p2pBW);
-    // config_set_key("p2psf", &config->p2pSF);
-    // config_set_key("p2pcr", &config->p2pCR);
-    // config_set_key("lrwsf", &config->lrwSF);
-    // config_set_key("lrwadr", &config->lrwADR);
+    char *blob = (char *)malloc(FW_VER_SIZE*sizeof(char));
+    memset(blob, 1, FW_VER_SIZE*sizeof(char));
+
+    esp_err_t err = nvs_get_str(m_config_nvs, "fwver", blob, NULL);
+    if (err == ESP_ERR_NVS_NOT_FOUND) // ESP_ERR_NVS_NOT_FOUND error occurs if key doesn't exist yet
+    {
+        ESP_LOGE("fwver", "not found in NVS, setting key. Error (%s)\n", esp_err_to_name(err));
+        err = nvs_set_str(m_config_nvs, "fwver", config->fwVer);
+    }
+    free(blob);
+
+    set_key_u8(m_config_nvs, "fwverprot", &config->fwVerProtocol, 1);
+    set_key_u8(m_config_nvs, "lrwprot", &config->lrwProtocol, 1);
+    set_key_u8(m_config_nvs, "apn", (uint8_t *)config->apn, GSM_APN_SIZE);
+    set_key_u8(m_config_nvs, "gsmuser", (uint8_t *)config->gsmUser, GSM_USER_SIZE);
+    set_key_u8(m_config_nvs, "gsmpswd", (uint8_t *)config->gsmPswd, GSM_PSWD_SIZE);
+
+    set_key_u16(m_config_nvs, "gsmport", &config->gsmPort);
+
+    set_key_u8(m_config_nvs, "gsmserver", (uint8_t *)config->gsmServer, GSM_SERVER_SIZE);
+
+    set_key_u32(m_config_nvs, "p2ptxfreq", &config->p2pTXFreq);
+    set_key_u32(m_config_nvs, "p2prxfreq", &config->p2pRXFreq);
+
+    set_key_u8(m_config_nvs, "p2pbw", &config->p2pBW, 1);
+    set_key_u8(m_config_nvs, "p2psf", &config->p2pSF, 1);
+    set_key_u8(m_config_nvs, "p2pcr", &config->p2pCR, 1);
+    set_key_u8(m_config_nvs, "lrwsf", &config->lrwSF, 1);
+
+    uint8_t temp = config->lrwADR ? 1 : 0;
+    set_key_u8(m_config_nvs, "lrwadr", &temp, 1);
 }
 
-esp_err_t Storage::config_set_key(const char *key, void *data)
+void Storage::config_get(Isca_t *config)
 {
-    esp_err_t err = ESP_OK;
+    size_t length = FW_VER_SIZE * sizeof(char); // length must have the correct key size to avoid ESP_ERR_NVS_INVALID_LENGTH error
+    char tempStr[FW_VER_SIZE];
+    nvs_get_str(m_config_nvs, "fwver", tempStr, &length);
+    config->fwVer = (char *)malloc(FW_VER_SIZE*sizeof(char));
+    memcpy(config->fwVer, tempStr, length);
 
-    if (strcmp(key, "flags") == 0) 
-    {
-        uint16_t *temp = (uint16_t *)data;
-        set_key_u16(m_status_nvs, key, temp);
-    } 
-    else if (strcmp(key, "battmv") == 0)
-    {
-        int16_t aux = 0;
-        int16_t *temp = (int16_t *)data;
+    get_key_u8(m_config_nvs, "fwverprot", &config->fwVerProtocol, 1);
+    get_key_u8(m_config_nvs, "lrwprot", &config->lrwProtocol, 1);
 
-        err = nvs_get_i16(m_status_nvs, key, &aux);
-        if (err == ESP_ERR_NVS_NOT_FOUND)
-            ESP_LOGE(key, "not found in NVS, setting key. Error (%s)\n", esp_err_to_name(err));
+    uint8_t temp[64];
 
-        err = nvs_set_i16(m_status_nvs, key, *temp);
-    }
-    else if (strcmp(key, "tempC") == 0)
-    {
-        int8_t aux = 0;
-        int8_t *temp = (int8_t *)data;
-
-        err = nvs_get_i8(m_status_nvs, key, &aux);
-        if (err == ESP_ERR_NVS_NOT_FOUND)
-            ESP_LOGE(key, "not found in NVS, setting key. Error (%s)\n", esp_err_to_name(err));
-
-        err = nvs_set_i8(m_status_nvs, key, *temp);
-    }
-    else if (strcmp(key, "reset") == 0)
-    {
-        uint32_t *temp = (uint32_t *)data;
-        set_key_u32(m_status_nvs, key, temp);
-    }
-    else if (strcmp(key, "battstatus") == 0 || strcmp(key, "P2PCount") == 0)
-    {
-        uint8_t *temp = (uint8_t *)data;
-        set_key_u8(m_status_nvs, key, temp, 1);
-    }
-    else if (strcmp(key, "lastP2PTick") == 0 || strcmp(key, "lastLRWTick") == 0)
-    {
-        uint64_t *temp = (uint64_t *)data;
-        set_key_u64(m_status_nvs, key, temp);
-    }
-    else if (strcmp(key, "acc") == 0)
-    {
-        int32_t temp[3];
+    get_key_u8(m_config_nvs, "apn", temp, 64);
+    memcpy(config->apn, temp, 64);
     
-        err = nvs_get_blob(m_status_nvs, key, temp, NULL);
-        if (err == ESP_ERR_NVS_NOT_FOUND) // ESP_ERR_NVS_NOT_FOUND error occurs if key doesn't exist yet
-            ESP_LOGE(key, "not found in NVS, setting key. Error (%s)\n", esp_err_to_name(err));
+    get_key_u8(m_config_nvs, "gsmuser", temp, 64);
+    memcpy(config->gsmUser, temp, 64);
+    get_key_u8(m_config_nvs, "gsmpswd", temp, 64);
+    memcpy(config->gsmPswd, temp, 64);
 
-        err = nvs_set_blob(m_status_nvs, key, data, 3*sizeof(int32_t));
-    }
-    else if (strcmp(key, "temp") == 0)
-    {
-        float temp;
+    get_key_u16(m_config_nvs, "gsmport", &config->gsmPort);
 
-        err = nvs_get_blob(m_status_nvs, key, &temp, NULL);
-        if (err == ESP_ERR_NVS_NOT_FOUND) // ESP_ERR_NVS_NOT_FOUND error occurs if key doesn't exist yet
-            ESP_LOGE(key, "not found in NVS, setting key. Error (%s)\n", esp_err_to_name(err));
+    get_key_u8(m_config_nvs, "gsmserver", temp, 64);
+    memcpy(config->gsmServer, temp, 64);
 
-        err = nvs_set_blob(m_status_nvs, key, data, 4);
-    }
-    if (err != ESP_OK) 
-    {
-        ESP_LOGE(key, "failed to set key. Error (%s)\n", esp_err_to_name(err));
-        return err;
-    }
+    get_key_u32(m_config_nvs, "p2ptxfreq", &config->p2pTXFreq);
+    get_key_u32(m_config_nvs, "p2prxfreq", &config->p2pRXFreq);
 
-    err = nvs_commit(m_status_nvs);
-    
-    if (err != ESP_OK) 
-        ESP_LOGE(key, "commiting failed. Error (%s)\n", esp_err_to_name(err));
+    get_key_u8(m_config_nvs, "p2pbw", &config->p2pBW, 1);
+    get_key_u8(m_config_nvs, "p2psf", &config->p2pSF, 1);
+    get_key_u8(m_config_nvs, "p2pcr", &config->p2pCR, 1);
+    get_key_u8(m_config_nvs, "lrwsf", &config->lrwSF, 1);
 
-    return err;
+    uint8_t aux = config->lrwADR ? 1 : 0;
+    get_key_u8(m_config_nvs, "lrwadr", &aux, 1);
 }
 
 void Storage::ble_lora_gsm_set(Isca_t *config)

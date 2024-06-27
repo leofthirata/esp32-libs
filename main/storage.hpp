@@ -49,7 +49,12 @@ public:
     /**
      * @brief Maximum number of stored codes.
      */
-    static const uint8_t MAX_CODES = 150;
+    static const uint8_t ACC_MAX_SIZE = 3;
+    static const uint8_t FW_VER_SIZE = 10;
+    static const uint8_t GSM_APN_SIZE = 64;
+    static const uint8_t GSM_USER_SIZE = 64;
+    static const uint8_t GSM_PSWD_SIZE = 64;
+    static const uint8_t GSM_SERVER_SIZE = 64;
 
     /**
      * @brief Constructor.
@@ -93,7 +98,6 @@ public:
     esp_err_t get_key_u32_20bits(nvs_handle_t ns, const char *key, uint32_t *data);
 
     esp_err_t status_get_key(const char *key, void *data);
-    esp_err_t config_set_key(const char *key, void *data);
 
     void status_set(Isca_t *status);
     void status_get(Isca_t *status);
