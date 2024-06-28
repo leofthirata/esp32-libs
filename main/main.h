@@ -92,6 +92,8 @@ typedef struct
     uint8_t batteryStatus;
     uint64_t lastP2PTick;
     uint64_t lastLRWTick;
+    uint64_t P2PAlarm;
+    uint64_t LRWAlarm;
     uint8_t P2PCount;
     int32_t acc[3];
     float temp;

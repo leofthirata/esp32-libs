@@ -11,7 +11,6 @@ QueueHandle_t xQueueLoRa;
 
 loraEvents_t p2p, lrw;
 static LoRa_SM_t state = LORA_SM_WAIT_FOR_SEND, state_prev = LORA_SM_WAIT_FOR_SEND;
-static RX_Packet_t rxDataP2P;
 static TaskHandle_t xTaskToNotify = NULL;
 
 static uint8_t m_lora_app_data_buffer[LORAWAN_APP_DATA_BUFF_SIZE];			  ///< Lora user application data buffer.
@@ -58,35 +57,35 @@ const char* printLoRaStateMachineState(LoRa_SM_t _status)
 	switch(_status)
 	{
 		case LORA_SM_WAIT_FOR_SEND:
-			return "LORA_SM_WAIT_FOR_SEND";
+			return "wait for send";
     	case LORA_SM_WAIT_FOR_TIMEOUT:
-			return "LORA_SM_WAIT_FOR_TIMEOUT";
+			return "waiting for timeout";
 		case LORA_SM_P2P_TX:
-			return "LORA_SM_P2P_TX";
+			return "P2P TX";
 		case LORA_SM_P2P_TX_DONE:
-			return "LORA_SM_P2P_TX_DONE";
+			return "P2P TX done";
 		case LORA_SM_P2P_TX_TIMEOUT:
-			return "LORA_SM_P2P_TX_TIMEOUT";
+			return "P2P TX timeout";
 		case LORA_SM_P2P_RX_DONE:
-			return "LORA_SM_P2P_RX_DONE";
+			return "P2P RX done";
 		case LORA_SM_P2P_RX_TIMEOUT:
-			return "LORA_SM_P2P_RX_TIMEOUT";
+			return "P2P RX timeout";
 		case LORA_SM_P2P_RX_ERROR:
-			return "LORA_SM_P2P_RX_ERROR";
+			return "P2P RX error";
 		case LORA_SM_LRW_TX:
-			return "LORA_SM_LRW_TX";
+			return "LRW TX";
 		case LORA_SM_LRW_TX_DONE:
-			return "LORA_SM_LRW_TX_DONE";
+			return "LRW TX_done";
 		case LORA_SM_LRW_TX_TIMEOUT:
-			return "LORA_SM_LRW_TX_TIMEOUT";
-		case LORA_SM_LRW_TX_STATUS:
-			return "LORA_SM_LRW_TX_STATUS";
+			return "LRW TX timeout";
+		case LORA_SM_LRW_STATUS_TX:
+			return "LRW STATUS TX";
 		case LORA_SM_LRW_RX_DONE:
-			return "LORA_SM_LRW_RX_DONE";
+			return "LRW RX done";
 		case LORA_SM_LRW_RX_TIMEOUT:
-			return "LORA_SM_LRW_RX_TIMEOUT";
+			return "LRW RX timeout";
 		case LORA_SM_LRW_RX_ERROR:
-			return "LORA_SM_LRW_RX_ERROR";
+			return "LRW RX error";
 		default:
 			return "UNKNOW STATUS";
 	}
@@ -95,67 +94,60 @@ const char* printLoRaStateMachineState(LoRa_SM_t _status)
 
 void p2pTXDone()
 {
-	printf("	[PRE_NOTIFY] %lld P2P TX DONE\r\n", esp_timer_get_time());
 	xTaskNotify(xTaskToNotify, LORA_BIT_P2P_TX_DONE, eSetBits);
 }
 
 void p2pTXTimeout(timeoutType_t type)
 {
-	printf("	[PRE_NOTIFY] %lld P2P TX TIMEOUT\r\n", esp_timer_get_time());
 	xTaskNotify(xTaskToNotify, LORA_BIT_P2P_TX_TIMEOUT, eSetBits);
 }
 
 void p2pRXDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
-	printf("	[PRE_NOTIFY] %lld P2P RX DONE\r\n", esp_timer_get_time());
-	rxDataP2P.rssi = rssi;
-	rxDataP2P.size = size;
-	rxDataP2P.snr = snr;
-	
-	memcpy(rxDataP2P.payload, payload, size);
+	printf("	[Pre notify] RX DONE\r\n");
+	memset(&_p2pRX, 0, sizeof(loraP2PRXParam_t));
+
+	memcpy(&_p2pRX.buffer, payload, size );
+	_p2pRX.rssi = rssi;
+	_p2pRX.size = size;
+	_p2pRX.snr = snr;
+	esp_event_post(APP_EVENT, APP_EVENT_P2P_RX, (void*)&_p2pRX, sizeof(loraP2PRXParam_t), 0);
 	xTaskNotify(xTaskToNotify, LORA_BIT_P2P_RX_DONE, eSetBits);
 }
 
 void p2pRXTimeout(timeoutType_t type)
 {
-	printf("	[PRE_NOTIFY] %lld P2P RX TIMEOUT\r\n", esp_timer_get_time());
+	printf("	[PRE NOTIFY] RX TIMEOUT\r\n");
 	xTaskNotify(xTaskToNotify, LORA_BIT_P2P_RX_TIMEOUT, eSetBits);
 }
 
 void p2pRXError()
 {
-	printf("	[PRE_NOTIFY] %lld P2P RX ERROR\r\n", esp_timer_get_time());
 	xTaskNotify(xTaskToNotify, LORA_BIT_P2P_RX_ERROR, eSetBits);
 }
 
 void lrwTXDone()
 {
-	
-	printf("	[PRE_NOTIFY] %lld LRW TX DONE\r\n", esp_timer_get_time());
 	xTaskNotify(xTaskToNotify, LORA_BIT_LRW_TX_DONE, eSetBits);
 }
 
 void lrwTXTimeout(timeoutType_t type)
 {
-	printf("	[PRE_NOTIFY] %lld LRW TX TIMEOUT\r\n", esp_timer_get_time());
 	xTaskNotify(xTaskToNotify, LORA_BIT_LRW_TX_TIMEOUT, eSetBits);
 }
 
 void lrwRXDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
-	printf("	[PRE_NOTIFY] %lld LRW RX DONE\r\n", esp_timer_get_time());
 	xTaskNotify(xTaskToNotify, LORA_BIT_LRW_RX_DONE, eSetBits);
 }
 
 void lrwRXTimeout(timeoutType_t type)
 {
-	printf("	[PRE_NOTIFY] %lld LRW RX TIMEOUT\r\n", esp_timer_get_time());
 	xTaskNotify(xTaskToNotify, LORA_BIT_LRW_RX_TIMEOUT, eSetBits);
 }
 
 void lrwRXError()
 {
-	printf("	[PRE_NOTIFY] %lld LRW RX ERROR\r\n", esp_timer_get_time());
 	xTaskNotify(xTaskToNotify, LORA_BIT_LRW_RX_ERROR, eSetBits);
 }
 
@@ -195,8 +187,6 @@ static void lorawanRX(lmh_app_data_t *app_data)
 		printf(" %02X ", *(app_data->buffer + i));
 	printf("}\r\n");
 
-	//static local variable 
-	static loraLRWRXParam_t params;
 	uint16_t size = 0;
 
 	if( (app_data->buffsize) > LORA_MAX_PAYLOAD )
@@ -204,15 +194,15 @@ static void lorawanRX(lmh_app_data_t *app_data)
 	else
 		size = app_data->buffsize;
 
-	memcpy(params.buffer, app_data->buffer, size);
+	memcpy(_lrwRX.buffer, app_data->buffer, size);
 	
-	params.size = size;
-	params.port = app_data->port;
-	params.rssi = app_data->rssi;
-	params.snr = app_data->snr;
+	_lrwRX.size = size;
+	_lrwRX.port = app_data->port;
+	_lrwRX.rssi = app_data->rssi;
+	_lrwRX.snr = app_data->snr;
 
 
-	esp_event_post(APP_EVENT, APP_EVENT_LRW_RX, (void*)&params, sizeof(loraLRWRXParam_t), 0);
+	esp_event_post(APP_EVENT, APP_EVENT_LRW_RX, (void*)&_lrwRX, sizeof(loraLRWRXParam_t), 0);
 
 	switch (app_data->port)
 	{
@@ -263,7 +253,6 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
 		memset(&_p2pTX, 0, sizeof(loraP2PTXParam_t));
 		memcpy(&_p2pTX, p2pTX_p, sizeof(loraP2PTXParam_t));
 		xQueueSend(xQueueLoRa, &p2pElement, 0);
-		printf("P2P Send Event \r\n");
     }
     if (event_base == APP_EVENT && event_id == APP_EVENT_QUEUE_LRW_SEND)
     {
@@ -272,7 +261,6 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
 		memset(&_lrwTX, 0, sizeof(loraLRWTXParam_t));
 		memcpy(&_lrwTX, lrwTX_p, sizeof(loraLRWTXParam_t));
 		xQueueSend(xQueueLoRa, &lrwElement, 0);
-		printf("LRW Send Event: \r\n");
     }
 
 }
@@ -342,7 +330,8 @@ void loraTask(void* param)
 
 	// Start Join procedure
 	lmh_join();
-
+	uint32_t ulNotifiedValue = 0;
+	const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 10000 );
     while(1)
     {
         ESP_LOGI(TAG, "%s", printLoRaStateMachineState(state));
@@ -350,6 +339,7 @@ void loraTask(void* param)
 		{
 			case LORA_SM_WAIT_FOR_SEND:
 				
+				printf("\r\n");
 				if( xQueueReceive( xQueueLoRa, &( typeSendLoRa ), portMAX_DELAY ) == pdPASS )
 				{
 					if(typeSendLoRa == QUEUE_SEND_P2P)
@@ -366,71 +356,72 @@ void loraTask(void* param)
 
 			case LORA_SM_WAIT_FOR_TIMEOUT:
 			{
-				uint32_t ulNotifiedValue;
-				const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 10000 );
-                BaseType_t xResult = xTaskNotifyWait( pdFALSE,    /* Don't clear bits on entry. */
-                           ULONG_MAX,        /* Clear all bits on exit. */
-                           &ulNotifiedValue, /* Stores the notified value. */
-                           xMaxBlockTime );
-
-                if( xResult == pdPASS )
-                {
-                    /* A notification was received.  See which bits were set. */
-                    if( ( ulNotifiedValue & LORA_BIT_P2P_TX_DONE ) != 0 )
-                    {
-						state = LORA_SM_P2P_TX_DONE;
-						
-					} 
-					else if((ulNotifiedValue & LORA_BIT_P2P_TX_TIMEOUT) != 0 )
-					{
-						state = LORA_SM_P2P_TX_TIMEOUT;
-						
-					} 
-					else if((ulNotifiedValue & LORA_BIT_P2P_RX_DONE) != 0 )
-					{
-						state = LORA_SM_P2P_RX_DONE;
-						
-					} 
-					else if((ulNotifiedValue & LORA_BIT_P2P_RX_TIMEOUT) != 0 )
-					{
-						state = LORA_SM_P2P_RX_TIMEOUT;
-						
-					} 
-					else if((ulNotifiedValue & LORA_BIT_P2P_RX_ERROR) != 0 )
-					{
-						state = LORA_SM_P2P_RX_ERROR;
-						
-					} 
-					else if((ulNotifiedValue & LORA_BIT_LRW_TX_DONE) != 0 )
-					{
-						state = LORA_SM_LRW_TX_DONE;
-						
-					} 
-					else if((ulNotifiedValue & LORA_BIT_LRW_TX_TIMEOUT) != 0 )
-					{
-						state = LORA_SM_LRW_TX_TIMEOUT;
-						
-					} 
-					else if((ulNotifiedValue & LORA_BIT_LRW_RX_DONE) != 0 )
-					{	
-						state = LORA_SM_LRW_RX_DONE;
-						
-					} 
-					else if((ulNotifiedValue & LORA_BIT_LRW_RX_TIMEOUT) != 0 )
-					{
-						state = LORA_SM_LRW_RX_TIMEOUT;
-						
-					} 
-					else if((ulNotifiedValue & LORA_BIT_LRW_RX_ERROR) != 0 )
-					{
-						state = LORA_SM_LRW_RX_ERROR;
-						
-					}
-				}
-				else
+				state = LORA_SM_WAIT_FOR_SEND;
+                if(ulNotifiedValue == 0)
 				{
-					/* The call to ulTaskNotifyTake() timed out. */
-					state = LORA_SM_WAIT_FOR_SEND;
+					xTaskNotifyWait( pdFALSE, pdFALSE, &ulNotifiedValue, xMaxBlockTime );
+				}
+				ESP_LOGW(TAG, "Task Notify: %03lX", ulNotifiedValue);
+
+				if( ( ulNotifiedValue & LORA_BIT_P2P_TX_DONE ) != 0 )
+				{
+					state = LORA_SM_P2P_TX_DONE;
+					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_TX_DONE );
+                    ulNotifiedValue &= ~LORA_BIT_P2P_TX_DONE;
+				} 
+				else if((ulNotifiedValue & LORA_BIT_P2P_TX_TIMEOUT) != 0 )
+				{
+					state = LORA_SM_P2P_TX_TIMEOUT;
+					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_TX_TIMEOUT );
+                    ulNotifiedValue &= ~LORA_BIT_P2P_TX_TIMEOUT;
+				} 
+				else if((ulNotifiedValue & LORA_BIT_P2P_RX_TIMEOUT) != 0 )
+				{
+					state = LORA_SM_P2P_RX_TIMEOUT;
+					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_RX_TIMEOUT );
+                    ulNotifiedValue &= ~LORA_BIT_P2P_RX_TIMEOUT;
+				} 
+				else if((ulNotifiedValue & LORA_BIT_P2P_RX_DONE) != 0 )
+				{
+					state = LORA_SM_P2P_RX_DONE;
+					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_RX_DONE );
+                    ulNotifiedValue &= ~LORA_BIT_P2P_RX_DONE;
+				} 
+				else if((ulNotifiedValue & LORA_BIT_P2P_RX_ERROR) != 0 )
+				{
+					state = LORA_SM_P2P_RX_ERROR;
+					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_RX_ERROR );
+                    ulNotifiedValue &= ~LORA_BIT_P2P_RX_ERROR;
+				} 
+				else if((ulNotifiedValue & LORA_BIT_LRW_TX_DONE) != 0 )
+				{
+					state = LORA_SM_LRW_TX_DONE;
+					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_TX_DONE );
+                    ulNotifiedValue &= ~LORA_BIT_LRW_TX_DONE;
+				} 
+				else if((ulNotifiedValue & LORA_BIT_LRW_TX_TIMEOUT) != 0 )
+				{
+					state = LORA_SM_LRW_TX_TIMEOUT;
+					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_TX_TIMEOUT );
+                    ulNotifiedValue &= ~LORA_BIT_LRW_TX_TIMEOUT;
+				} 
+				else if((ulNotifiedValue & LORA_BIT_LRW_RX_DONE) != 0 )
+				{	
+					state = LORA_SM_LRW_RX_DONE;
+					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_RX_DONE );
+                    ulNotifiedValue &= ~LORA_BIT_LRW_RX_DONE;					
+				} 
+				else if((ulNotifiedValue & LORA_BIT_LRW_RX_TIMEOUT) != 0 )
+				{
+					state = LORA_SM_LRW_RX_TIMEOUT;
+					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_RX_TIMEOUT );
+                    ulNotifiedValue &= ~LORA_BIT_LRW_RX_TIMEOUT;					
+				} 
+				else if((ulNotifiedValue & LORA_BIT_LRW_RX_ERROR) != 0 )
+				{
+					state = LORA_SM_LRW_RX_ERROR;
+					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_RX_ERROR );
+                    ulNotifiedValue &= ~LORA_BIT_LRW_RX_ERROR;					
 				}
 
 				state_prev = LORA_SM_WAIT_FOR_TIMEOUT;
@@ -510,21 +501,7 @@ void loraTask(void* param)
 
 			case LORA_SM_P2P_RX_DONE:
 			{
-				char payload[256] = {'0'};
-				for(int i = 0; i < rxDataP2P.size; i++)
-				{
-					sprintf(payload + strlen(payload), "%02X", rxDataP2P.payload[i]);
-				}
-				ESP_LOGW(TAG, "P2P Received | rssi:%d | snr:%d | payload[%d]%s:", rxDataP2P.rssi, rxDataP2P.snr, rxDataP2P.size, payload);
-
-				memset(&_p2pRX, 0, sizeof(loraP2PRXParam_t));
-
-				memcpy(&_p2pRX.buffer, rxDataP2P.payload, rxDataP2P.size );
-				_p2pRX.rssi = rxDataP2P.rssi;
-				_p2pRX.size = rxDataP2P.size;
-				_p2pRX.snr = rxDataP2P.snr;
-
-				esp_event_post(APP_EVENT, APP_EVENT_P2P_RX, (void*)&_p2pRX, sizeof(loraP2PRXParam_t), 0);
+				// esp_event_post(APP_EVENT, APP_EVENT_P2P_RX, (void*)&_p2pRX, sizeof(loraP2PRXParam_t), 0);
 				
 				state_prev = LORA_SM_P2P_RX_DONE;
 				state = LORA_SM_WAIT_FOR_TIMEOUT;
@@ -605,7 +582,7 @@ void loraTask(void* param)
 			case LORA_SM_P2P_TX_TIMEOUT:
 			case LORA_SM_P2P_RX_ERROR:
 			case LORA_SM_LRW_TX_TIMEOUT:
-			case LORA_SM_LRW_TX_STATUS:
+			case LORA_SM_LRW_STATUS_TX:
 			case LORA_SM_LRW_RX_DONE:
 			case LORA_SM_LRW_RX_ERROR:
 

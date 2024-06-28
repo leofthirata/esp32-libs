@@ -4,7 +4,7 @@
 
 static Isca_t *m_config;
 static bool resetRequested = false;
-static const char *TAG = "STATE";
+static const char *TAG = "StateTask";
 static Isca_SM_t state;
 static TaskHandle_t xTaskToNotify = NULL;
 
@@ -152,6 +152,7 @@ void stopLoRaTimers()
 
 		printf("[TIMER] Stopping Active P2P Timer %llus |\r\n", expiryTime/1000000);
 		esp_timer_stop(p2pTimer);
+        m_config->P2PAlarm = 0;
     }
 
     if(esp_timer_is_active(lrwTimer))
@@ -161,13 +162,15 @@ void stopLoRaTimers()
 
 		printf("[TIMER] Stopping Active LRW Timer %llus |\r\n", expiryTime/1000000);
 		esp_timer_stop(lrwTimer);
+        m_config->LRWAlarm = 0;
     }
 }
 
 
 void updateP2PTimer(uint32_t newTime)
 {
-	if(esp_timer_is_active(p2pTimer))
+	int64_t now;
+    if(esp_timer_is_active(p2pTimer))
 	{
 		uint64_t expiryTime = 0;
 		esp_timer_get_expiry_time(p2pTimer, &expiryTime);
@@ -175,6 +178,7 @@ void updateP2PTimer(uint32_t newTime)
 		printf("[TIMER] Stopping Active P2P Timer %llus |\r\n", expiryTime/1000000);
 		esp_timer_stop(p2pTimer);
 		printf("[TIMER] Restarting P2P Timer new timeout %lus |\r\n", newTime);
+        now = esp_timer_get_time();
 		uint8_t ret_val = esp_timer_start_periodic(p2pTimer, (uint64_t)newTime*1000000);
 		if(ret_val != ESP_OK)
 		{
@@ -185,6 +189,7 @@ void updateP2PTimer(uint32_t newTime)
     else
     {
         printf("[TIMER] Starting P2P Timer new timeout %lus |\r\n", newTime);
+        now = esp_timer_get_time();
         uint8_t ret_val = esp_timer_start_periodic(p2pTimer, (uint64_t)newTime*1000000);
         if(ret_val != ESP_OK)
 		{
@@ -192,11 +197,13 @@ void updateP2PTimer(uint32_t newTime)
 			while(1);
 		}
     }
+    m_config->P2PAlarm = now + (newTime*1000000);
 }
 
 void updateLRWTimer(uint32_t newTime)
 {
-	if(esp_timer_is_active(lrwTimer))
+    int64_t now;
+    if(esp_timer_is_active(lrwTimer))
 	{
 		uint64_t expiryTime = 0;
 		esp_timer_get_expiry_time(lrwTimer, &expiryTime);
@@ -204,6 +211,7 @@ void updateLRWTimer(uint32_t newTime)
 		printf("[TIMER] Stopping Active LRW Timer %llus |\r\n", expiryTime/1000000);
 		esp_timer_stop(lrwTimer);
 		printf("[TIMER] Restarting LRW Timer new timeout %lus |\r\n", newTime);
+        now = esp_timer_get_time();
 		uint8_t ret_val = esp_timer_start_periodic(lrwTimer, (uint64_t)newTime*1000000);
 		if(ret_val != ESP_OK)
 		{
@@ -214,6 +222,7 @@ void updateLRWTimer(uint32_t newTime)
     else
     {
         printf("[TIMER] Starting LRW Timer new timeout %lus |\r\n", newTime);
+        now = esp_timer_get_time();
         uint8_t ret_val = esp_timer_start_periodic(lrwTimer, (uint64_t)newTime*1000000);
         if(ret_val != ESP_OK)
 		{
@@ -221,6 +230,7 @@ void updateLRWTimer(uint32_t newTime)
 			while(1);
 		}
     }
+    m_config->LRWAlarm = now + (newTime*1000000);
 }
 
 void changeLoRaTimes(uint32_t *timeArray)
@@ -283,17 +293,31 @@ void changeLRW_SE_Time(uint32_t time)
 
 static void p2pTimerCallback(void* arg)
 {
-    int64_t time_since_boot = esp_timer_get_time();
-    printf("\r\n\r\n[TIMER] ------------ P2P TIMEOUT ------------\r\n");
-    m_config->lastP2PTick = time_since_boot;
+    int64_t now = esp_timer_get_time();
+    ESP_LOGW(TAG, "----------- P2P TIMEOUT ------------\r\n");
+    m_config->lastP2PTick = now;
+    uint64_t p2pExpiryTime;
+    esp_err_t ret = esp_timer_get_period(p2pTimer, &p2pExpiryTime);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Get P2P TIMER failed %d", ret);
+    }
+    m_config->P2PAlarm = now + p2pExpiryTime;
     xTaskNotify(xTaskToNotify, BIT_P2P_TX, eSetBits);
 }
 
 static void lrwTimerCallback(void* arg)
 {
-    int64_t time_since_boot = esp_timer_get_time();
-    printf("\r\n\r\n[TIMER] ------------ LRWTIMEOUT ------------\r\n");
-    m_config->lastLRWTick = time_since_boot;
+    int64_t now = esp_timer_get_time();
+    ESP_LOGW(TAG, "------------ LRWTIMEOUT ------------\r\n");
+    m_config->lastLRWTick = now;
+    uint64_t lrwExpiryTime;
+    esp_err_t ret = esp_timer_get_period(p2pTimer, &lrwExpiryTime);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Get P2P TIMER failed %d", ret);
+    }
+    m_config->LRWAlarm = now + lrwExpiryTime;
     xTaskNotify(xTaskToNotify, BIT_LRW_TX, eSetBits);
 }
 
@@ -302,14 +326,14 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
 {
     if (event_base == APP_EVENT && event_id == APP_EVENT_P2P_RX)
     {
-        printf("P2P RCV Event\r\n");
+        // printf("P2P RCV Event\r\n");
         static loraP2PRXParam_t *p2pRX_p = (loraP2PRXParam_t*) event_data;
         memcpy(&lrwRX, p2pRX_p, sizeof(loraP2PRXParam_t));
         xTaskNotify(xTaskToNotify, BIT_P2P_RX, eSetBits);
     }
     if (event_base == APP_EVENT && event_id == APP_EVENT_LRW_RX)
     {
-        printf("LRW RCV Event\r\n");
+        // printf("LRW RCV Event\r\n");
         static loraLRWRXParam_t *lrwRX_p = (loraLRWRXParam_t*) event_data;
         memcpy(&lrwRX, lrwRX_p, sizeof(loraLRWRXParam_t));
         xTaskNotify(xTaskToNotify, BIT_LRW_RX, eSetBits);
@@ -364,11 +388,10 @@ void stateTask (void* pvParameters)
     
     state = SM_UPDATE_TIMERS;
     uint64_t p2pExpiryTime = 0, lrwExpiryTime = 0;
-    uint32_t ulNotifiedValue;
+    uint32_t ulNotifiedValue = 0;
     const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 10000 );
 
-    esp_event_handler_instance_register(
-        APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
+    esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
 
     while(1)
     {
@@ -376,62 +399,45 @@ void stateTask (void* pvParameters)
         {
             case SM_WAIT_FOR_EVENT:
             {             
-                BaseType_t xResult;   
                 if(ulNotifiedValue == 0)
                 {
-                    xResult = xTaskNotifyWait( pdFALSE,    /* Don't clear bits on entry. */
-                            pdFALSE,        /* Clear all bits on exit. */
-                            &ulNotifiedValue, /* Stores the notified value. */
-                            xMaxBlockTime );
+                    xTaskNotifyWait( pdFALSE, pdFALSE, &ulNotifiedValue, xMaxBlockTime );
                 }
 
-                ESP_LOGW(TAG, "TASK Notify %04lX", ulNotifiedValue);
-                
-                // if( xResult == pdPASS )
-                // {
-                    /* A notification was received.  See which bits were set. */
-                    if( ( ulNotifiedValue & BIT_P2P_TX ) != 0 )
-                    {
-                        state = SM_SEND_P2P;
-                        ulTaskNotifyValueClear( xTaskToNotify, BIT_P2P_TX );
-                        ulNotifiedValue &= ~BIT_P2P_TX;
-                        
-                    } else if( ( ulNotifiedValue & BIT_P2P_RX ) != 0 )
-                    {
-                        state = SM_RCV_P2P;
-                        ulTaskNotifyValueClear( xTaskToNotify, BIT_P2P_RX );
-                        ulNotifiedValue &= ~BIT_P2P_RX;
+                int64_t now = esp_timer_get_time();
 
-                    } else if( ( ulNotifiedValue & BIT_LRW_TX ) != 0 )
-                    {
-                        state = SM_SEND_LRW;
-                        ulTaskNotifyValueClear( xTaskToNotify, BIT_LRW_TX );
-                        ulNotifiedValue &= ~BIT_LRW_TX;
+                ESP_LOGI(TAG, "TASK Notify: %02lX | Timeout P2P: %03llds | Timeout LRW: %03llds", ulNotifiedValue,
+                        // ((p2pExpiryTime))/1000000, ((lrwExpiryTime))/1000000);
+                        ((m_config->P2PAlarm - now))/1000000, ((m_config->LRWAlarm - now))/1000000);
 
-                    } else if( ( ulNotifiedValue & BIT_LRW_RX ) != 0 )
-                    {
-                        state = SM_RCV_LRW;
-                        ulTaskNotifyValueClear( xTaskToNotify, BIT_LRW_RX );
-                        ulNotifiedValue &= ~BIT_LRW_RX;
-                    }
+                if( ( ulNotifiedValue & BIT_P2P_TX ) != 0 )
+                {
+                    state = SM_SEND_P2P;
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_P2P_TX );
+                    ulNotifiedValue &= ~BIT_P2P_TX;
+                    
+                } 
+                else if( ( ulNotifiedValue & BIT_P2P_RX ) != 0 )
+                {
+                    state = SM_RCV_P2P;
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_P2P_RX );
+                    ulNotifiedValue &= ~BIT_P2P_RX;
 
-                // }
-                // else
-                // {
-                    /* Did not receive a notification within the expected time. */
-                    const int64_t now = esp_timer_get_time();
-                    esp_err_t ret = esp_timer_get_period(p2pTimer, &p2pExpiryTime);
-                    if (ret != ESP_OK)
-                    {
-                        ESP_LOGE(TAG, "TIMERS GET P2P failed %d", ret);
-                    }
-                    ret = esp_timer_get_period(lrwTimer, &lrwExpiryTime);
-                    if (ret != ESP_OK)
-                    {
-                        ESP_LOGE(TAG, "TIMERS GET LRW failed %d", ret);
-                    }
-                    ESP_LOGW(TAG, "TIMERS P2P:%llds | LRW:%llds", ((m_config->lastP2PTick + p2pExpiryTime)-now)/1000000, ((m_config->lastLRWTick +lrwExpiryTime)-now)/1000000);
-                // }
+                } 
+                else if( ( ulNotifiedValue & BIT_LRW_TX ) != 0 )
+                {
+                    state = SM_SEND_LRW;
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_LRW_TX );
+                    ulNotifiedValue &= ~BIT_LRW_TX;
+
+                } 
+                else if( ( ulNotifiedValue & BIT_LRW_RX ) != 0 )
+                {
+                    state = SM_RCV_LRW;
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_LRW_RX );
+                    ulNotifiedValue &= ~BIT_LRW_RX;
+                }
+
             }
             break;
             
@@ -485,7 +491,7 @@ void stateTask (void* pvParameters)
 
             case SM_RCV_P2P:
 
-                printf("[LORA] rssi:%d | size:%d\r\n",  p2pRX.rssi, p2pRX.size);
+                //printf("[LORA] rssi:%d | size:%d\r\n",  p2pRX.rssi, p2pRX.size);
                 
                 if(p2pRX.size == sizeof(CommandP2P_t))
                 {
@@ -551,11 +557,11 @@ void stateTask (void* pvParameters)
                 // queueLRW();
 
 				//Serial.printf("lmh_send result %d\n", error);
-				printf("[LORA] PARSE TX LRW Protocol Version: %02X | ", lrwTX.buffer[0]);
-				printf("LoRaID: %02X %02X %02X | ", lrwTX.buffer[1], lrwTX.buffer[2], lrwTX.buffer[3]);
-				printf("Temp: 0x%02X = %d | ", lrwTX.buffer[4], lrwTX.buffer[4]);
-				printf("Battery: 0x%04X = %d mV | ", m_config->batteryMiliVolts, m_config->batteryMiliVolts);
-				printf("Flags: %02X %02X\r\n", lrwTX.buffer[7], lrwTX.buffer[8]);
+				// printf("[LORA] PARSE TX LRW Protocol Version: %02X | ", lrwTX.buffer[0]);
+				// printf("LoRaID: %02X %02X %02X | ", lrwTX.buffer[1], lrwTX.buffer[2], lrwTX.buffer[3]);
+				// printf("Temp: 0x%02X = %d | ", lrwTX.buffer[4], lrwTX.buffer[4]);
+				// printf("Battery: 0x%04X = %d mV | ", m_config->batteryMiliVolts, m_config->batteryMiliVolts);
+				// printf("Flags: %02X %02X\r\n", lrwTX.buffer[7], lrwTX.buffer[8]);
                 state = SM_WAIT_FOR_EVENT;
             break;
             
