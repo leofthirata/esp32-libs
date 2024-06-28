@@ -19,7 +19,6 @@
  ******************************************************************************/
 
 #include "sdkconfig.h"
-// #if HSSN_PRODUCT_ID == 1 || HSSN_PRODUCT_ID == 2
 #pragma once
 
 #include <cstdint>
@@ -40,20 +39,38 @@ class Storage
 {
 public:
     /**
-     * @brief Infrared storage version.
-     *
-     * Internal storage version, used to do migrations on after upgrades.
+     * @brief Maximum number of stored positions.
      */
-    static constexpr const int8_t VERSION = 0;
+    static const uint32_t GSM_MAX_POSITIONS = 1000;
 
     /**
-     * @brief Maximum number of stored codes.
+     * @brief Number of accelerometer axis.
      */
     static const uint8_t ACC_MAX_SIZE = 3;
+
+    /**
+     * @brief Firmware version string size.
+     */
     static const uint8_t FW_VER_SIZE = 10;
+
+    /**
+     * @brief GSM APN size.
+     */
     static const uint8_t GSM_APN_SIZE = 64;
+
+    /**
+     * @brief GSM User size.
+     */
     static const uint8_t GSM_USER_SIZE = 64;
+
+    /**
+     * @brief GSM Password size.
+     */
     static const uint8_t GSM_PSWD_SIZE = 64;
+
+    /**
+     * @brief GSM Server size.
+     */
     static const uint8_t GSM_SERVER_SIZE = 64;
 
     /**
@@ -76,76 +93,103 @@ public:
     esp_err_t deinit();
 
     /**
-     * @brief Store a new key in the database.
+     * @brief Save Isca_t status in the databse.
      *
-     * @param[in] code IR code to store.
-     * @param[out] id New ir code ID.
+     * @param[in] status Isca_t status.
      *
      * @return
      */
-    
-    esp_err_t set_key_u8(nvs_handle_t ns, const char *key, uint8_t *data, size_t size);
-    esp_err_t set_key_u16(nvs_handle_t ns, const char *key, uint16_t *data);
-    esp_err_t set_key_u32(nvs_handle_t ns, const char *key, uint32_t *data);
-    esp_err_t set_key_u64(nvs_handle_t ns, const char *key, uint64_t *data);
-    esp_err_t set_key_u32_20bits(nvs_handle_t ns, const char *key, uint32_t *data);
-    esp_err_t status_set_key(const char *key, void *data);
-
-    esp_err_t get_key_u8(nvs_handle_t ns, const char *key, uint8_t *data, size_t size);
-    esp_err_t get_key_u16(nvs_handle_t ns, const char *key, uint16_t *data);
-    esp_err_t get_key_u32(nvs_handle_t ns, const char *key, uint32_t *data);
-    esp_err_t get_key_u64(nvs_handle_t ns, const char *key, uint64_t *data);
-    esp_err_t get_key_u32_20bits(nvs_handle_t ns, const char *key, uint32_t *data);
-
-    esp_err_t status_get_key(const char *key, void *data);
-
     void status_set(Isca_t *status);
+
+    /**
+     * @brief Read Isca_t status in the databse.
+     *
+     * @param[out] status Isca_t status.
+     *
+     * @return
+     */
     void status_get(Isca_t *status);
 
+    /**
+     * @brief Save Isca_t OTP keys in the databse.
+     *
+     * @param[in] otp Isca_t OTP keys.
+     *
+     * @return
+     */
     void otp_set(Isca_t *otp);
+
+    /**
+     * @brief Read Isca_t OTP keys in the databse.
+     *
+     * @param[out] otp Isca_t OTP keys.
+     *
+     * @return
+     */
     void otp_get(Isca_t *otp);
 
+    /**
+     * @brief Save Isca_t configurations in the databse.
+     *
+     * @param[in] config Isca_t configurations.
+     *
+     * @return
+     */
     void config_set(Isca_t *config);
+
+    /**
+     * @brief Read Isca_t configurations in the databse.
+     *
+     * @param[out] config Isca_t configurations.
+     *
+     * @return
+     */
     void config_get(Isca_t *config);
 
+    /**
+     * @brief Save BLE, LoRa and GSM configurations in the databse.
+     *
+     * @param[in] config BLE, LoRa and GSM configurations.
+     *
+     * @return
+     */
     void ble_lora_gsm_set(Isca_t *config);
+
+    /**
+     * @brief Read BLE, LoRa and GSM configurations.
+     *
+     * @param[out] config BLE, LoRa and GSM configurations.
+     *
+     * @return
+     */
     void ble_lora_gsm_get(Isca_t *config);
 
     /**
-     * @brief Find an infreared code in the database.
+     * @brief Save a position in the database.
      *
-     * @param[in] id IR code ID.
-     * @param[out] code IR code.
-     *
-     * @return
-     */
-    // esp_err_t find(uint32_t id, ESPP::InfraRed::Code &code);
-
-    /**
-     * @brief Remove an IR code from the database.
-     *
-     * @param[in] id IR code ID.
+     * @param[in] json Position message in json format.
+     * @param[out] id Position id saved in nvs.
      *
      * @return
      */
-    esp_err_t remove(uint32_t id);
+    esp_err_t gsm_save_position(char *json, uint32_t *id);
+    
+    /**
+     * @brief Read the last position in the database. Updates the last position after reading.
+     *
+     * @param[out] json Last saved position message in json format.
+     * @param[out] len Last saved position length.
+     *
+     * @return
+     */
+    esp_err_t gsm_get_last_position(char *json, size_t *len);
 
     /**
-     * @brief Erase all codes form flash.
-     */
-    void erase();
-
-    /**
-     * @brief Check if key exists in flash.
+     * @brief Remove all keys from GSM namespace.
      *
-     * @param[in] key Key string.
-     * @param[in] data Key Value.
-     *
-     * @return true if key already exists.
+     * @return
      */
-    bool exist(char *key, uint8_t *data);
-
-    // TODO: list codes;
+    esp_err_t gsm_erase_nvs();
 
 private:
     nvs_handle m_status_nvs;
@@ -153,15 +197,23 @@ private:
     nvs_handle m_config_nvs;
     nvs_handle m_gsm_position_nvs;
 
-    uint32_t m_position_id;
     uint32_t m_id;
 
-    esp_err_t readVersion(int8_t &version);
-    esp_err_t readCounter();
-    esp_err_t writeCounter();
-    esp_err_t readId();
-    esp_err_t writeId();
+    esp_err_t gsm_save_id();
+    esp_err_t set_id(uint32_t *id);
+    esp_err_t get_id(uint32_t *id);
+
+    esp_err_t set_key_u8(nvs_handle_t ns, const char *key, uint8_t *data, size_t size);
+    esp_err_t set_key_u16(nvs_handle_t ns, const char *key, uint16_t *data);
+    esp_err_t set_key_u32(nvs_handle_t ns, const char *key, uint32_t *data);
+    esp_err_t set_key_u64(nvs_handle_t ns, const char *key, uint64_t *data);
+    esp_err_t set_key_u32_20bits(nvs_handle_t ns, const char *key, uint32_t *data);
+
+    esp_err_t get_key_u8(nvs_handle_t ns, const char *key, uint8_t *data, size_t size);
+    esp_err_t get_key_u16(nvs_handle_t ns, const char *key, uint16_t *data);
+    esp_err_t get_key_u32(nvs_handle_t ns, const char *key, uint32_t *data);
+    esp_err_t get_key_u64(nvs_handle_t ns, const char *key, uint64_t *data);
+    esp_err_t get_key_u32_20bits(nvs_handle_t ns, const char *key, uint32_t *data);
 };
 
 } // namespace Storage
-// #endif
