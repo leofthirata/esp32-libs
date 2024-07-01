@@ -18,16 +18,20 @@
  * @copyright F&K Group
  ******************************************************************************/
 
-#include "sdkconfig.h"
 #pragma once
 
 #include <cstdint>
+#include <cctype>
+#include <cstdlib>
+#include <string.h>
 
+#include "esp_log.h"
 #include "esp_err.h"
 
 #include "nvs.h"
 #include "nvs_flash.h"
-#include "main.h"
+
+#include "../../test/main/main.h"
 
 namespace Storage
 {
