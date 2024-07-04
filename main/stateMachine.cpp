@@ -7,23 +7,28 @@ static bool resetRequested = false;
 static const char *TAG = "StateTask";
 static Isca_SM_t state;
 static TaskHandle_t xTaskToNotify = NULL;
+static QueueHandle_t xQueueP2PRx, xQueueLRWRx;
 
 static void p2pTimerCallback(void* arg);
 static void lrwTimerCallback(void* arg);
 esp_timer_handle_t p2pTimer;
 esp_timer_handle_t lrwTimer;
-static loraLRWRXParam_t lrwRX;
-static loraP2PTXParam_t p2pTX;
-static loraLRWTXParam_t lrwTX;
-static loraP2PRXParam_t p2pRX;
 
-/** @brief IP event base declaration */
+static LoRaElementLRWTx_t lrwTx;
+static LoRaElementLRWRx_t lrwRx;
+static LoRaElementP2PRx_t p2pRx;
+static LoRaElementP2P_t p2pTx, p2pTxDone;
+static LoRaElementLRWTxDone_t lrwTxDone;
+
+// APP event base declaration
 ESP_EVENT_DECLARE_BASE(APP_EVENT);
 
-#define BIT_LRW_TX  0x01
+#define BIT_LRW_REQ_TX  0x01
 #define BIT_LRW_RX  0x02
-#define BIT_P2P_TX  0x04
+#define BIT_P2P_REQ_TX  0x04
 #define BIT_P2P_RX  0x08
+#define BIT_P2P_TX_DONE 0x10
+#define BIT_LRW_TX_DONE 0x20
 
 
 void stopLoRaTimers();
@@ -95,15 +100,15 @@ void disableLed()
 
 void enterEmergency()
 {
-    setMachineState(SM_ENTER_EMERGENCY);
-    xTaskNotifyGive(xTaskToNotify);
+    // setMachineState(SM_ENTER_EMERGENCY);
+    // xTaskNotifyGive(xTaskToNotify);
     printf("[SM] WARNING! Emergency ON!\r\n");
 }
 
 void exitEmergency()
 {
-    setMachineState(SM_EXIT_EMERGENCY);	
-    xTaskNotifyGive(xTaskToNotify);
+    // setMachineState(SM_EXIT_EMERGENCY);	
+    // xTaskNotifyGive(xTaskToNotify);
     printf("[SM] WARNING! Emergency OFF!\r\n");
 }
 
@@ -248,47 +253,68 @@ void changeLoRaTimes(uint32_t *timeArray)
 	printf("\tLRW_MN: %d | LRW_ME: %d | LRW_SN: %d | LRW_SE: %d\r\n", m_config->lrwMovNorm, m_config->lrwMovEmer, m_config->lrwStpNorm, m_config->lrwStpEmer);
 }
 
-
-void changeP2P_SN_Time(uint32_t time)
+const char* printTimeType(TimeType_t type)
 {
-	printf("[SM] Warning! Change P2P SN Time\r\n");
-	if(time > 0xFFFFF)
-		time = 0xFFFFF;
-
-	m_config->p2pStpNorm = time;
-	updateP2PTimer(time);
+    switch (type)
+    {
+        case P2P_SN_Time:
+            return "P2P_SN_Time";
+        case P2P_SE_Time:
+            return "P2P_SE_Time";
+        case P2P_MN_Time:
+            return "P2P_MN_Time";
+        case P2P_ME_Time:
+            return "P2P_ME_Time";
+        case LRW_SN_Time:
+            return "LRW_SN_Time";
+        case LRW_SE_Time:
+            return "LRW_SE_Time";
+        case LRW_MN_Time:
+            return "LRW_MN_Time";
+        case LRW_ME_Time:
+            return "LRW_ME_Time";
+        default:
+            break;
+    }
+    return "Unknow error";
 }
 
-void changeP2P_SE_Time(uint32_t time)
+void changeTime(TimeType_t type, uint32_t time)
 {
-	printf("[SM] Warning! Change P2P SE Time\r\n");
-	if(time > 0xFFFFF)
+    printf("[SM] Warning! Change %s\r\n", printTimeType(type));
+	
+    if(time > 0xFFFFF)
 		time = 0xFFFFF;
+    
+    switch(type)
+    {
+        case P2P_SN_Time:
+            m_config->p2pStpNorm = time;
+            updateP2PTimer(time);
+        break;
+        case P2P_SE_Time:
+        	m_config->p2pStpEmer = time;
+            updateP2PTimer(time);
+        break;
+        case P2P_MN_Time:
+        break;
+        case P2P_ME_Time:
+        break;
+        case LRW_SN_Time:
+        	m_config->lrwStpNorm = time;
+            updateLRWTimer(time);
+        break;
+        case LRW_SE_Time:
+        	m_config->lrwStpEmer = time;
+	        updateLRWTimer(time);
+        break;
+        case LRW_MN_Time:
+        break;
+        case LRW_ME_Time:
+        break;
+    }
 
-	m_config->p2pStpEmer = time;
-	updateP2PTimer(time);
 }
-
-void changeLRW_SN_Time(uint32_t time)
-{
-	printf("[SM] Warning! Change LRW SN Time\r\n");
-	if(time > 0xFFFFF)
-		time = 0xFFFFF;
-
-	m_config->lrwStpNorm = time;
-	updateLRWTimer(time);
-}
-
-void changeLRW_SE_Time(uint32_t time)
-{
-	printf("[SM] Warning! Change LRW SE Time\r\n");
-	if(time > 0xFFFFF)
-		time = 0xFFFFF;
-
-	m_config->lrwStpEmer = time;
-	updateLRWTimer(time);
-}
-
 
 
 static void p2pTimerCallback(void* arg)
@@ -303,7 +329,7 @@ static void p2pTimerCallback(void* arg)
         ESP_LOGE(TAG, "Get P2P TIMER failed %d", ret);
     }
     m_config->P2PAlarm = now + p2pExpiryTime;
-    xTaskNotify(xTaskToNotify, BIT_P2P_TX, eSetBits);
+    xTaskNotify(xTaskToNotify, BIT_P2P_REQ_TX, eSetBits);
 }
 
 static void lrwTimerCallback(void* arg)
@@ -312,13 +338,13 @@ static void lrwTimerCallback(void* arg)
     ESP_LOGW(TAG, "------------ LRWTIMEOUT ------------\r\n");
     m_config->lastLRWTick = now;
     uint64_t lrwExpiryTime;
-    esp_err_t ret = esp_timer_get_period(p2pTimer, &lrwExpiryTime);
+    esp_err_t ret = esp_timer_get_period(lrwTimer, &lrwExpiryTime);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "Get P2P TIMER failed %d", ret);
+        ESP_LOGE(TAG, "Get LRW TIMER failed %d", ret);
     }
     m_config->LRWAlarm = now + lrwExpiryTime;
-    xTaskNotify(xTaskToNotify, BIT_LRW_TX, eSetBits);
+    xTaskNotify(xTaskToNotify, BIT_LRW_REQ_TX, eSetBits);
 }
 
 static void app_event_handler(void *arg, esp_event_base_t event_base,
@@ -326,48 +352,69 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
 {
     if (event_base == APP_EVENT && event_id == APP_EVENT_P2P_RX)
     {
-        // printf("P2P RCV Event\r\n");
-        static loraP2PRXParam_t *p2pRX_p = (loraP2PRXParam_t*) event_data;
-        memcpy(&lrwRX, p2pRX_p, sizeof(loraP2PRXParam_t));
+        LoRaElementP2PRx_t *p2pRx_p = (LoRaElementP2PRx_t*) event_data;
+        memcpy(&p2pRx, p2pRx_p, sizeof(LoRaElementP2PRx_t));
+        xQueueSend(xQueueP2PRx, &p2pRx, 0);
         xTaskNotify(xTaskToNotify, BIT_P2P_RX, eSetBits);
     }
+
     if (event_base == APP_EVENT && event_id == APP_EVENT_LRW_RX)
     {
-        // printf("LRW RCV Event\r\n");
-        static loraLRWRXParam_t *lrwRX_p = (loraLRWRXParam_t*) event_data;
-        memcpy(&lrwRX, lrwRX_p, sizeof(loraLRWRXParam_t));
+        LoRaElementLRWRx_t *lrwRX_p = (LoRaElementLRWRx_t*) event_data;
+        memcpy(&lrwRx, lrwRX_p, sizeof(LoRaElementLRWRx_t));
+        xQueueSend(xQueueLRWRx, &lrwRx, 0);
         xTaskNotify(xTaskToNotify, BIT_LRW_RX, eSetBits);
-
     }
+
+    if(event_base == APP_EVENT && event_id == APP_EVENT_P2P_TX_DONE)
+    {
+        LoRaElementP2P_t *p2pTxDone_p = (LoRaElementP2P_t*) event_data;
+        memcpy(&p2pTxDone, p2pTxDone_p, sizeof(LoRaElementP2P_t));
+        xTaskNotify(xTaskToNotify, BIT_P2P_TX_DONE, eSetBits);
+    }
+
+    if(event_base == APP_EVENT && event_id == APP_EVENT_LRW_TX_DONE)
+    {
+        LoRaElementLRWTxDone_t *lrwTxDone_p = (LoRaElementLRWTxDone_t*) event_data;
+        memcpy(&lrwTxDone, lrwTxDone_p, sizeof(LoRaElementLRWTxDone_t));
+        xTaskNotify(xTaskToNotify, BIT_LRW_TX_DONE, eSetBits);
+    }
+
     if(event_base == APP_EVENT && event_id == APP_EVENT_REQ_P2P_SEND)
     {
         uint64_t now = esp_timer_get_time();
         if(now - m_config->lastP2PTick > 10000000 )
         {
-            xTaskNotify(xTaskToNotify, BIT_P2P_TX, eSetBits);
             m_config->lastP2PTick = now;
+            xTaskNotify(xTaskToNotify, BIT_P2P_REQ_TX, eSetBits);
         }
     }
+
     if(event_base == APP_EVENT && event_id == APP_EVENT_REQ_LRW_SEND)
     {
         uint64_t now = esp_timer_get_time();
         if(now - m_config->lastLRWTick > 10000000 )
         {
-            xTaskNotify(xTaskToNotify, BIT_LRW_TX, eSetBits);
             m_config->lastP2PTick = now;
+            xTaskNotify(xTaskToNotify, BIT_LRW_REQ_TX, eSetBits);
         }
     }
 
 }
 
-void lorawanRX();
-
+void lorawanRX(LoRaElementLRWRx_t* _lrwRx);
 
 void stateTask (void* pvParameters)
 {
     xTaskToNotify = xTaskGetCurrentTaskHandle();
+    
     m_config = (Isca_t *)pvParameters;
+    
+    xQueueP2PRx = xQueueCreate(QUEUE_P2P_RX_SIZE, sizeof(LoRaElementP2PRx_t));
+    xQueueLRWRx = xQueueCreate(QUEUE_LRW_RX_SIZE, sizeof(LoRaElementLRWRx_t));
 
+    esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
+    
     const esp_timer_create_args_t p2pTimerArgs = {
             .callback = &p2pTimerCallback,
             .name = "p2pTimer"
@@ -380,18 +427,16 @@ void stateTask (void* pvParameters)
 
     ESP_ERROR_CHECK(esp_timer_create(&p2pTimerArgs, &p2pTimer));
     ESP_ERROR_CHECK(esp_timer_create(&lrwTimerArgs, &lrwTimer));
-    
+        
     m_config->p2pStpEmer = 0x1E;
     m_config->p2pStpNorm = 0x3C;
     m_config->lrwStpEmer = 0x1E;
     m_config->lrwStpNorm = 0x3C;
     
-    state = SM_UPDATE_TIMERS;
-    uint64_t p2pExpiryTime = 0, lrwExpiryTime = 0;
     uint32_t ulNotifiedValue = 0;
-    const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 10000 );
-
-    esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
+    const TickType_t xMaxBlockTime = pdMS_TO_TICKS( TIMEOUT_STATE_MACHINE );
+    
+    state = SM_UPDATE_TIMERS;
 
     while(1)
     {
@@ -399,38 +444,55 @@ void stateTask (void* pvParameters)
         {
             case SM_WAIT_FOR_EVENT:
             {             
-                if(ulNotifiedValue == 0)
+                if(ulNotifiedValue == 0 && (uxQueueSpacesAvailable(xQueueLRWRx) == QUEUE_LRW_RX_SIZE) &&
+                            (uxQueueSpacesAvailable(xQueueP2PRx) == QUEUE_P2P_RX_SIZE) )
                 {
                     xTaskNotifyWait( pdFALSE, pdFALSE, &ulNotifiedValue, xMaxBlockTime );
                 }
 
                 int64_t now = esp_timer_get_time();
 
-                ESP_LOGI(TAG, "TASK Notify: %02lX | Timeout P2P: %03llds | Timeout LRW: %03llds", ulNotifiedValue,
-                        // ((p2pExpiryTime))/1000000, ((lrwExpiryTime))/1000000);
-                        ((m_config->P2PAlarm - now))/1000000, ((m_config->LRWAlarm - now))/1000000);
+                ESP_LOGI(TAG, "flags: %02lX | Timeout P2P: %03llds | Timeout LRW: %03llds", 
+                ulNotifiedValue,((m_config->P2PAlarm - now))/1000000, ((m_config->LRWAlarm - now))/1000000);
 
-                if( ( ulNotifiedValue & BIT_P2P_TX ) != 0 )
+                if(uxQueueSpacesAvailable(xQueueP2PRx) != QUEUE_P2P_RX_SIZE)
+                {
+                    state = SM_RCV_P2P;
+                } 
+                else if(uxQueueSpacesAvailable(xQueueLRWRx) != QUEUE_LRW_RX_SIZE)
+                {
+                    state = SM_RCV_LRW;
+                }
+                else if( ( ulNotifiedValue & BIT_P2P_REQ_TX ) != 0 )
                 {
                     state = SM_SEND_P2P;
-                    ulTaskNotifyValueClear( xTaskToNotify, BIT_P2P_TX );
-                    ulNotifiedValue &= ~BIT_P2P_TX;
-                    
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_P2P_REQ_TX );
+                    ulNotifiedValue &= ~BIT_P2P_REQ_TX;
                 } 
+                else if( ( ulNotifiedValue & BIT_P2P_TX_DONE ) != 0 )
+                {
+                    state = SM_SEND_P2P_DONE;
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_P2P_TX_DONE );
+                    ulNotifiedValue &= ~BIT_P2P_TX_DONE;
+                }
                 else if( ( ulNotifiedValue & BIT_P2P_RX ) != 0 )
                 {
                     state = SM_RCV_P2P;
                     ulTaskNotifyValueClear( xTaskToNotify, BIT_P2P_RX );
                     ulNotifiedValue &= ~BIT_P2P_RX;
-
                 } 
-                else if( ( ulNotifiedValue & BIT_LRW_TX ) != 0 )
+                else if( ( ulNotifiedValue & BIT_LRW_REQ_TX ) != 0 )
                 {
                     state = SM_SEND_LRW;
-                    ulTaskNotifyValueClear( xTaskToNotify, BIT_LRW_TX );
-                    ulNotifiedValue &= ~BIT_LRW_TX;
-
-                } 
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_LRW_REQ_TX );
+                    ulNotifiedValue &= ~BIT_LRW_REQ_TX;
+                }
+                else if( ( ulNotifiedValue & BIT_LRW_TX_DONE ) != 0 )
+                {
+                    state = SM_SEND_LRW_DONE;
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_LRW_TX_DONE );
+                    ulNotifiedValue &= ~BIT_LRW_TX_DONE;
+                }
                 else if( ( ulNotifiedValue & BIT_LRW_RX ) != 0 )
                 {
                     state = SM_RCV_LRW;
@@ -466,109 +528,138 @@ void stateTask (void* pvParameters)
                 if (counter++ > 63)
                     counter = 0;
 
-                // atribui novo valor ao byte do crc
                 pos.array[5] = dallas_crc8((const uint8_t*) (pos.array),
                     sizeof(PositionP2P_t));
                 
-                memset(&p2pTX, 0, sizeof(loraP2PTXParam_t));
-                memcpy(&p2pTX.buffer, pos.array, sizeof(PositionP2P_t));
-                p2pTX.BW = m_config->p2pBW;
-                p2pTX.CR = m_config->p2pCR;
-                p2pTX.freq = m_config->p2pTXFreq;
-                p2pTX.SF = m_config->p2pSF;
-                p2pTX.size = sizeof(PositionP2P_t);
-                p2pTX.txPower = m_config->p2pTxPower;
-
-                p2pTX.timeoutRX = m_config->p2pRXTimeout;
-                p2pTX.freqRX = m_config->p2pRXFreq;
-                p2pTX.delayRX = m_config->p2pRXDelay;
-                esp_event_post(APP_EVENT, APP_EVENT_QUEUE_P2P_SEND, (void*)&p2pTX, sizeof(loraP2PTXParam_t), 0);
+                memset(&p2pTx.payload.buffer, 0, sizeof(p2pTx.payload.buffer));
+                memcpy(&p2pTx.payload.buffer, pos.array, sizeof(PositionP2P_t));
+                p2pTx.payload.size = sizeof(PositionP2P_t);
+                
+                p2pTx.params.txFreq = m_config->p2pTXFreq;
+                p2pTx.params.txPower = m_config->p2pTxPower;
+                p2pTx.params.BW = m_config->p2pBW;
+                p2pTx.params.SF = m_config->p2pSF;
+                p2pTx.params.CR = m_config->p2pCR;
+                p2pTx.params.rxFreq = m_config->p2pRXFreq;
+                p2pTx.params.rxDelay = m_config->p2pRXDelay;
+                p2pTx.params.rxTimeout = m_config->p2pRXTimeout;
+               
+                esp_event_post(APP_EVENT, APP_EVENT_QUEUE_P2P_SEND, (void*)&p2pTx, sizeof(LoRaElementP2P_t), 0);
 
                 state = SM_WAIT_FOR_EVENT;
             }
 
             break;
 
+            case SM_SEND_P2P_DONE:
+            {
+                //static LoRaElementP2P_t p2pTx, p2pTxDone;
+                PositionP2PUnion_t pos;
+                memcpy(&pos, p2pTxDone.payload.buffer, sizeof(PositionP2PUnion_t));
+                printf("[LORA] PARSE P2P TX Counter: %02d | ", pos.param.header.sequenceNumber);
+                printf("LoraID: %.2X%.2X%.2X | ", pos.param.loraId[0], pos.param.loraId[1], pos.param.loraId[2]);
+                printf("Batt: %.2X | ", pos.param.batteryVoltage);
+                printf("Accelerometer: %s | ", (pos.param.flags.accelerometerStatus) ? "ON" : "OFF");
+                printf("criticalBatteryStatus: %s | ", (pos.param.flags.criticalBatteryStatus) ? "ON" : "OFF");
+                printf("powerSupplyStatus: %s | ", (pos.param.flags.powerSupplyStatus) ? "ON" : "OFF");
+                printf("Emergency: %s\r\n", (pos.param.flags.emergencyStatus) ? "ON" : "OFF");
+                state = SM_WAIT_FOR_EVENT;
+            }
+            break;
+
             case SM_RCV_P2P:
-
-                //printf("[LORA] rssi:%d | size:%d\r\n",  p2pRX.rssi, p2pRX.size);
-                
-                if(p2pRX.size == sizeof(CommandP2P_t))
+            {
+                LoRaElementP2PRx_t _rx;
+                if(xQueueReceive(xQueueP2PRx, &_rx, 10) == pdPASS)
                 {
-                    CommandP2PUnion_t commandReceived;
-                    memcpy(commandReceived.array, p2pRX.buffer, p2pRX.size);
-
-                    uint8_t lCrc = commandReceived.param.crc8;
-                    commandReceived.param.crc8 = 0;
-                    uint8_t crcValidation = dallas_crc8(commandReceived.array, sizeof(CommandP2P_t));
-
-                    if(crcValidation == lCrc)
+                    if(_rx.payload.size == sizeof(CommandP2P_t))
                     {
-                        uint32_t idLora = 0;
-                        idLora += commandReceived.param.loraIdReceiveCommand[0];
-                        idLora += (commandReceived.param.loraIdReceiveCommand[1] << 8);
-                        idLora += (commandReceived.param.loraIdReceiveCommand[2] << 16);
+                        CommandP2PUnion_t commandReceived;
+                        memcpy(commandReceived.array, _rx.payload.buffer, _rx.payload.size);
 
-                        if (idLora == m_config->loraId)
+                        uint8_t lCrc = commandReceived.param.crc8;
+                        commandReceived.param.crc8 = 0;
+                        uint8_t crcValidation = dallas_crc8(commandReceived.array, sizeof(CommandP2P_t));
+
+                        if(crcValidation == lCrc)
                         {
+                            uint32_t idLora = 0;
+                            idLora += commandReceived.param.loraIdReceiveCommand[0];
+                            idLora += (commandReceived.param.loraIdReceiveCommand[1] << 8);
+                            idLora += (commandReceived.param.loraIdReceiveCommand[2] << 16);
 
-                            printf("[LORA] Message for me from %02X%02X%02X | rssi: %d | srn: %d | ",
-                                                        commandReceived.param.loraIdGw[2],
-                                                        commandReceived.param.loraIdGw[1],
-                                                        commandReceived.param.loraIdGw[0],
-                                                        p2pRX.rssi, p2pRX.snr);
-
-                            if (commandReceived.param.loraEmergencyCommand)
+                            if (idLora == m_config->loraId)
                             {
-                                enterEmergency();
+                                printf("[LORA] Message for me from %02X%02X%02X | rssi: %d | srn: %d | ",
+                                                            commandReceived.param.loraIdGw[2],
+                                                            commandReceived.param.loraIdGw[1],
+                                                            commandReceived.param.loraIdGw[0],
+                                                            _rx.params.rssi, _rx.params.snr);
+
+                                if (commandReceived.param.loraEmergencyCommand)
+                                {
+                                    enterEmergency();
+                                }
+                                else
+                                {
+                                    exitEmergency();
+                                }
+
                             }
                             else
                             {
-                                exitEmergency();
+                                printf("[LORA] No P2P_RX for me =(\r\n");
                             }
-
-                        }
-                        else
-                        {
-                            printf("[LORA] No P2P_RX for me =(\r\n");
                         }
                     }
                 }
-
                 state = SM_WAIT_FOR_EVENT;
+            }
             break;
 
             case SM_SEND_LRW:
-                memset(&lrwTX, 0, sizeof(lrwTX));
-                lrwTX.port = m_config->lrwCmdPort;
-                lrwTX.confirmed = m_config->lrwConfirmed;
-                lrwTX.buffer[0] = m_config->lrwProtocol;
-                lrwTX.buffer[1] = (m_config->loraId >> 16) & 0xFF;
-                lrwTX.buffer[2] = (m_config->loraId >> 8) & 0xFF;
-                lrwTX.buffer[3] = m_config->loraId & 0xFF;
-                lrwTX.buffer[4] = m_config->temperatureCelsius;
-                lrwTX.buffer[5] = (uint8_t)((m_config->batteryMiliVolts & 0xFF00)>>8);
-                lrwTX.buffer[6] = (uint8_t)(m_config->batteryMiliVolts & 0x00FF);
-                lrwTX.buffer[7] = m_config->flags.asArray[0];
-                lrwTX.buffer[8] = m_config->flags.asArray[1];
-                lrwTX.size = 9;               
+            {                
+                lrwTx.params.port = m_config->lrwPosPort;
+                lrwTx.params.confirmed = m_config->lrwConfirmed;
+               
+                memset(&lrwTx.payload.buffer, 0, sizeof(lrwTx.payload.buffer));
+                lrwTx.payload.buffer[0] = m_config->lrwProtocol;
+                lrwTx.payload.buffer[1] = (m_config->loraId >> 16) & 0xFF;
+                lrwTx.payload.buffer[2] = (m_config->loraId >> 8) & 0xFF;
+                lrwTx.payload.buffer[3] = m_config->loraId & 0xFF;
+                lrwTx.payload.buffer[4] = m_config->temperatureCelsius;
+                lrwTx.payload.buffer[5] = (uint8_t)((m_config->batteryMiliVolts & 0xFF00)>>8);
+                lrwTx.payload.buffer[6] = (uint8_t)(m_config->batteryMiliVolts & 0x00FF);
+                lrwTx.payload.buffer[7] = m_config->flags.asArray[0];
+                lrwTx.payload.buffer[8] = m_config->flags.asArray[1];
+                lrwTx.payload.size = 9;               
                 
-                esp_event_post(APP_EVENT, APP_EVENT_QUEUE_LRW_SEND, &lrwTX, sizeof(lrwTX), 0);
-                // queueLRW();
+                esp_event_post(APP_EVENT, APP_EVENT_QUEUE_LRW_SEND, &lrwTx, sizeof(LoRaElementLRWTx_t), 0);
 
-				//Serial.printf("lmh_send result %d\n", error);
-				// printf("[LORA] PARSE TX LRW Protocol Version: %02X | ", lrwTX.buffer[0]);
-				// printf("LoRaID: %02X %02X %02X | ", lrwTX.buffer[1], lrwTX.buffer[2], lrwTX.buffer[3]);
-				// printf("Temp: 0x%02X = %d | ", lrwTX.buffer[4], lrwTX.buffer[4]);
-				// printf("Battery: 0x%04X = %d mV | ", m_config->batteryMiliVolts, m_config->batteryMiliVolts);
-				// printf("Flags: %02X %02X\r\n", lrwTX.buffer[7], lrwTX.buffer[8]);
                 state = SM_WAIT_FOR_EVENT;
+            }
             break;
-            
-            case SM_RCV_LRW:
-                printf("[LORA] port:%d | rssi:%d | size:%d\r\n", lrwRX.port, lrwRX.rssi, lrwRX.size);
 
-                lorawanRX();
+            case SM_SEND_LRW_DONE:
+            {
+                //static LoRaElementLRWTxDone_t lrwTxDone;
+                printf("[LORA] LRW TX Uplink: %ld | channel: %d | length: %d \r\n", lrwTxDone.done.upLinkCounter, lrwTxDone.done.channel, lrwTxDone.done.length);
+				printf("[LORA] PARSE TX LRW Protocol Version: %02X | ", lrwTxDone.payload.buffer[0]);
+				printf("LoRaID: %02X %02X %02X | ", lrwTxDone.payload.buffer[1], lrwTxDone.payload.buffer[2], lrwTxDone.payload.buffer[3]);
+				printf("Temp: 0x%02X = %d | ", lrwTxDone.payload.buffer[4], lrwTxDone.payload.buffer[4]);
+				printf("Battery: %d mV | ", (int)((lrwTxDone.payload.buffer[5]<<8) + lrwTxDone.payload.buffer[6]));
+				printf("Flags: %02X %02X\r\n", lrwTxDone.payload.buffer[7], lrwTxDone.payload.buffer[8]);
+                
+                state = SM_WAIT_FOR_EVENT;
+            }
+            break;
+
+            case SM_RCV_LRW:
+                LoRaElementLRWRx_t _rx;
+                if(xQueueReceive(xQueueLRWRx, &_rx, 10) == pdPASS)
+                {
+                    lorawanRX(&_rx);
+                }
                 state = SM_WAIT_FOR_EVENT;
             break;
             
@@ -600,7 +691,7 @@ void stateTask (void* pvParameters)
             break;
 
         }
-        vTaskDelay(1000);
+        //vTaskDelay(1000);
     }
 }
 const char* getCMDString(CommandLRWDict_t command)
@@ -648,24 +739,29 @@ const char* getCMDString(CommandLRWDict_t command)
 	}
 }
 
-void lorawanRX()
+void lorawanRX(LoRaElementLRWRx_t* _lrwRx)
 {
-    if(lrwRX.port == LRW_CMD_PORT)
+    LoRaLRWRxParams_t* rxParams = (LoRaLRWRxParams_t*)&_lrwRx->params;
+    printf("[LORA] LRW downlink received port:%d | snr: %d  | rssi: %d {", rxParams->port,rxParams->snr, rxParams->rssi);
+	for (uint8_t i = 0; i < _lrwRx->payload.size; i++)
+		printf(" %02X ", _lrwRx->payload.buffer[i]);
+	printf("}\r\n");
+    if(rxParams->port == LRW_CMD_PORT)
     {
         uint8_t pktCounter = 0;
         bool error = false;
-        if(lrwRX.buffer[0] == CMD_LRW_HEADER)
+        if(_lrwRx->payload.buffer[0] == CMD_LRW_HEADER)
         {
             pktCounter = 1;
-            while(pktCounter < (lrwRX.size-1) && error == false)
+            while(pktCounter < (_lrwRx->payload.size-1) && error == false)
             {
-                switch(lrwRX.buffer[pktCounter])
+                switch(_lrwRx->payload.buffer[pktCounter])
                 {
                 case EMERGENCY:
-                    if(lrwRX.size - (pktCounter+1) >= CMD_PARAM_SIZE_EMER)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= CMD_PARAM_SIZE_EMER)
                     {
 
-                        if(lrwRX.buffer[pktCounter + 1])
+                        if(_lrwRx->payload.buffer[pktCounter + 1])
                             enterEmergency();
                         else
                             exitEmergency();
@@ -679,9 +775,9 @@ void lorawanRX()
                     break;
 
                 case BLUETOOTH:
-                    if(lrwRX.size - (pktCounter+1) >= CMD_PARAM_SIZE_BLE)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= CMD_PARAM_SIZE_BLE)
                     {
-                        if(lrwRX.buffer[pktCounter + 1])
+                        if(_lrwRx->payload.buffer[pktCounter + 1])
                             turnOnBLE();
                         else
                             turnOffBLE();
@@ -695,9 +791,9 @@ void lorawanRX()
                     break;
 
                 case STOCK_MODE:
-                    if(lrwRX.size - (pktCounter+1) >= CMD_PARAM_SIZE_STOCK)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= CMD_PARAM_SIZE_STOCK)
                     {
-                        if(lrwRX.buffer[pktCounter + 1])
+                        if(_lrwRx->payload.buffer[pktCounter + 1])
                             enterStockMode();
                         pktCounter+= CMD_PARAM_SIZE_STOCK;
                     }
@@ -709,9 +805,9 @@ void lorawanRX()
                     break;
 
                 case SET_OUTPUT:
-                    if(lrwRX.size - (pktCounter+1) >= CMD_PARAM_SIZE_OUTPUT)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= CMD_PARAM_SIZE_OUTPUT)
                     {
-                        if(lrwRX.buffer[pktCounter + 1])
+                        if(_lrwRx->payload.buffer[pktCounter + 1])
                             turnOnOutput();
                         else
                             turnOffOutput();
@@ -725,9 +821,9 @@ void lorawanRX()
                     break;
 
                 case DO_RESET:
-                    if(lrwRX.size - (pktCounter+1) >= CMD_PARAM_SIZE_RESET)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= CMD_PARAM_SIZE_RESET)
                     {
-                        if(lrwRX.buffer[pktCounter + 1])
+                        if(_lrwRx->payload.buffer[pktCounter + 1])
                             resetRequest();
                         pktCounter+= CMD_PARAM_SIZE_RESET;
                     }
@@ -739,9 +835,9 @@ void lorawanRX()
                     break;
 
                 case BLE_POWER:
-                    if(lrwRX.size - (pktCounter+1) >= CMD_PARAM_SIZE_BLE_POWER)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= CMD_PARAM_SIZE_BLE_POWER)
                     {
-                        if(lrwRX.buffer[pktCounter + 1] >= 0 &&  lrwRX.buffer[pktCounter + 1] <= 31)
+                        if(_lrwRx->payload.buffer[pktCounter + 1] <= 31)
                             //changeBLEPower(rxDataLRW.payload[pktCounter+1]);
                             changeBLEPower();
                         else
@@ -756,9 +852,9 @@ void lorawanRX()
                     break;
 
                 case BLE_TIME:
-                    if(lrwRX.size - (pktCounter+1) >= CMD_PARAM_SIZE_BLE_TIME)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= CMD_PARAM_SIZE_BLE_TIME)
                     {
-                        if(lrwRX.buffer[pktCounter + 1] >= 0 &&  lrwRX.buffer[pktCounter + 1] <= 31)
+                        if(_lrwRx->payload.buffer[pktCounter + 1] <= 31)
                             //changeBLETime(rxDataLRW.payload[pktCounter+1]);
                             changeBLETime();
                         else
@@ -773,22 +869,22 @@ void lorawanRX()
                     break;
 
                 case ALL_TIMES:
-                    if(lrwRX.buffer[pktCounter + 1] >= CMD_PARAM_SIZE_ALL_TIMES)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= CMD_PARAM_SIZE_ALL_TIMES)
                     {
                         uint32_t LoRaTimesArray[8] = {};
                         uint32_t *p_LoRaTimesArray = &LoRaTimesArray[0];
 
                         for(int i = 0; i < 20; i+=5)
                         {
-                            *p_LoRaTimesArray |= lrwRX.buffer[pktCounter + i + 1] << 12;
-                            *p_LoRaTimesArray |= lrwRX.buffer[pktCounter + i + 2] << 4;
-                            *p_LoRaTimesArray |= (lrwRX.buffer[pktCounter + i + 3] & 0xF0) >> 4;
+                            *p_LoRaTimesArray |= _lrwRx->payload.buffer[pktCounter + i + 1] << 12;
+                            *p_LoRaTimesArray |= _lrwRx->payload.buffer[pktCounter + i + 2] << 4;
+                            *p_LoRaTimesArray |= (_lrwRx->payload.buffer[pktCounter + i + 3] & 0xF0) >> 4;
 
                             p_LoRaTimesArray++;
 
-                            *p_LoRaTimesArray |= (lrwRX.buffer[pktCounter + i + 3] & 0x0F) << 16;
-                            *p_LoRaTimesArray |= lrwRX.buffer[pktCounter + i + 4] << 8;
-                            *p_LoRaTimesArray |= (lrwRX.buffer[pktCounter + i + 5]);
+                            *p_LoRaTimesArray |= (_lrwRx->payload.buffer[pktCounter + i + 3] & 0x0F) << 16;
+                            *p_LoRaTimesArray |= _lrwRx->payload.buffer[pktCounter + i + 4] << 8;
+                            *p_LoRaTimesArray |= (_lrwRx->payload.buffer[pktCounter + i + 5]);
 
                             p_LoRaTimesArray++;
                         }
@@ -806,9 +902,9 @@ void lorawanRX()
                     break;
 
                 case GET_STATUS:
-                    if(lrwRX.size - (pktCounter+1) >= CMD_PARAM_SIZE_GET_STATUS)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= CMD_PARAM_SIZE_GET_STATUS)
                     {
-                        if(lrwRX.buffer[pktCounter + 1])
+                        if(_lrwRx->payload.buffer[pktCounter + 1])
                             sendStatus();
                         pktCounter+= CMD_PARAM_SIZE_GET_STATUS;
                     }
@@ -820,9 +916,9 @@ void lorawanRX()
                     break;
 
                 case LED:
-                    if(lrwRX.size - (pktCounter+1) >= CMD_PARAM_SIZE_LED)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= CMD_PARAM_SIZE_LED)
                     {
-                        if(lrwRX.buffer[pktCounter + 1])
+                        if(_lrwRx->payload.buffer[pktCounter + 1])
                             enableLed();
                         else
                             disableLed();
@@ -839,32 +935,32 @@ void lorawanRX()
                 case P2P_MOV_EMER:
                 case LRW_MOV_NOR:
                 case LRW_MOV_EMER:
-                    if(lrwRX.size - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
                     {
                         uint32_t dummy = 0;
-                        dummy = (lrwRX.buffer[pktCounter + 1] & 0x0F) << 16;
-                        dummy |= lrwRX.buffer[pktCounter + 2]  << 8;
-                        dummy |= lrwRX.buffer[pktCounter + 3];
-                        printf("[LORA] Requested Change to %s:%ld\r\n", getCMDString((CommandLRWDict_t)lrwRX.buffer[pktCounter]),dummy);
+                        dummy = (_lrwRx->payload.buffer[pktCounter + 1] & 0x0F) << 16;
+                        dummy |= _lrwRx->payload.buffer[pktCounter + 2]  << 8;
+                        dummy |= _lrwRx->payload.buffer[pktCounter + 3];
+                        printf("[LORA] Requested Change to %s:%ld\r\n", getCMDString((CommandLRWDict_t)_lrwRx->payload.buffer[pktCounter]),dummy);
                         printf("WARNING! Feature not implemented\r\n");
                         pktCounter+= TIME_CMD_PARAM_SIZE;
                     }
                     else
                     {
-                        printf("[LORA] Warning! There's no %s parameter\r\n",  getCMDString((CommandLRWDict_t)lrwRX.buffer[pktCounter]));
+                        printf("[LORA] Warning! There's no %s parameter\r\n",  getCMDString((CommandLRWDict_t)_lrwRx->payload.buffer[pktCounter]));
                         error = 1;
                     }
                     break;
 
                 case P2P_STP_NOR:
-                    if(lrwRX.size - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
                     {
                         uint32_t dummy = 0;
-                        dummy = (lrwRX.buffer[pktCounter + 1] & 0x0F) << 16;
-                        dummy |= lrwRX.buffer[pktCounter + 2]  << 8;
-                        dummy |= lrwRX.buffer[pktCounter + 3];
+                        dummy = (_lrwRx->payload.buffer[pktCounter + 1] & 0x0F) << 16;
+                        dummy |= _lrwRx->payload.buffer[pktCounter + 2]  << 8;
+                        dummy |= _lrwRx->payload.buffer[pktCounter + 3];
                         printf("[LORA] Changed P2P SN to %ld\r\n", dummy);
-                        changeP2P_SN_Time(dummy);
+                        changeTime(P2P_SN_Time, dummy);
                         pktCounter+= TIME_CMD_PARAM_SIZE;
                     }
                     else
@@ -874,14 +970,14 @@ void lorawanRX()
                     }
                     break;
                 case P2P_STP_EMER:
-                    if(lrwRX.size - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
                     {
                         uint32_t dummy = 0;
-                        dummy = (lrwRX.buffer[pktCounter + 1] & 0x0F) << 16;
-                        dummy |= lrwRX.buffer[pktCounter + 2]  << 8;
-                        dummy |= lrwRX.buffer[pktCounter + 3];
+                        dummy = (_lrwRx->payload.buffer[pktCounter + 1] & 0x0F) << 16;
+                        dummy |= _lrwRx->payload.buffer[pktCounter + 2]  << 8;
+                        dummy |= _lrwRx->payload.buffer[pktCounter + 3];
                         printf("[LORA] Changed P2P SE to %ld\r\n", dummy);
-                        changeP2P_SE_Time(dummy);
+                        changeTime(P2P_SE_Time, dummy);
                         pktCounter+= TIME_CMD_PARAM_SIZE;
                     }
                     else
@@ -891,14 +987,14 @@ void lorawanRX()
                     }
                     break;
                 case LRW_STP_NOR:
-                    if(lrwRX.size - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
                     {
                         uint32_t dummy = 0;
-                        dummy = (lrwRX.buffer[pktCounter + 1] & 0x0F) << 16;
-                        dummy |= lrwRX.buffer[pktCounter + 2]  << 8;
-                        dummy |= lrwRX.buffer[pktCounter + 3];
+                        dummy = (_lrwRx->payload.buffer[pktCounter + 1] & 0x0F) << 16;
+                        dummy |= _lrwRx->payload.buffer[pktCounter + 2]  << 8;
+                        dummy |= _lrwRx->payload.buffer[pktCounter + 3];
                         printf("[LORA] Changed LRW SN to %ld\r\n", dummy);
-                        changeLRW_SN_Time(dummy);
+                        changeTime(LRW_SN_Time, dummy);
                         pktCounter+= TIME_CMD_PARAM_SIZE;
                     }
                     else
@@ -909,14 +1005,14 @@ void lorawanRX()
                     break;
 
                 case LRW_STP_EMER:
-                    if(lrwRX.size - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
+                    if(_lrwRx->payload.size - (pktCounter+1) >= TIME_CMD_PARAM_SIZE)
                     {
                         uint32_t dummy = 0;
-                        dummy = (lrwRX.buffer[pktCounter + 1] & 0x0F) << 16;
-                        dummy |= lrwRX.buffer[pktCounter + 2]  << 8;
-                        dummy |= lrwRX.buffer[pktCounter + 3];
+                        dummy = (_lrwRx->payload.buffer[pktCounter + 1] & 0x0F) << 16;
+                        dummy |= _lrwRx->payload.buffer[pktCounter + 2]  << 8;
+                        dummy |= _lrwRx->payload.buffer[pktCounter + 3];
                         printf("[LORA] Changed LRW SE to %ld\r\n", dummy);
-                        changeLRW_SE_Time(dummy);
+                        changeTime(LRW_SE_Time, dummy);
                         pktCounter+= TIME_CMD_PARAM_SIZE;
                     }
                     else

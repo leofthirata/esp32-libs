@@ -69,13 +69,13 @@ void button_handler (button_queue_t param)
             {
                 BiColorStatus::sendPosition();
                 //queueP2P();
-                esp_event_post(APP_EVENT, APP_EVENT_REQ_P2P_SEND, NULL, 0, 0);
+               // esp_event_post(APP_EVENT, APP_EVENT_REQ_P2P_SEND, NULL, 0, 0);
             }
             else
             {
                 BiColorStatus::batError();
                 //queueLRW();
-                esp_event_post(APP_EVENT, APP_EVENT_REQ_LRW_SEND, NULL, 0, 0);
+                //esp_event_post(APP_EVENT, APP_EVENT_REQ_LRW_SEND, NULL, 0, 0);
             }
         break;
 
@@ -185,13 +185,14 @@ void setup()
     
     BiColorStatus::init();
     BiColorStatus::turnOn();
-    
+    // Low priority numbers denote low priority tasks. The idle task has priority zero (tskIDLE_PRIORITY). 
     xTaskCreatePinnedToCore(sensorsTask, "sensorsTask", 4096, (void*) &config, 5, NULL, 0);
     xTaskCreatePinnedToCore(loraTask, "loraTask", 4096, (void*) &config, 5, NULL, 0);
-    xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &config, 5, NULL, 0);
+    xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &config, 6, NULL, 0);
     //xTaskCreate(modem_task_function, "modem_tsk", 8192, NULL, uxTaskPriorityGet(NULL), NULL);
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
+
 
 void loop()
 {

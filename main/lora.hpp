@@ -3,7 +3,7 @@
 
 #include "main.h"
 
-#define MAX_PAYLOAD_LORA 255
+#define LORA_MAX_PAYLOAD 128
 #define JOINREQ_NBTRIALS 3			   /**< Number of trials for the join request. */
 #define LORA_CODINGRATE 1		// [1: 4/5, 2: 4/6,  3: 4/7,  4: 4/8]
 #define LORA_PREAMBLE_LENGTH 8  // Same for Tx and Rx
@@ -65,7 +65,90 @@ typedef enum
 	LORA_SM_LRW_RX_DONE,
 	LORA_SM_LRW_RX_TIMEOUT,
 	LORA_SM_LRW_RX_ERROR,
-} LoRa_SM_t;
+} LoRaSM_t;
+
+typedef enum
+{
+    TYPE_P2P_TX,
+    TYPE_P2P_RX,
+    TYPE_LRW_TX,
+    TYPE_LRW_RX
+} LoRaType_t;
+
+typedef struct {
+	uint8_t	 buffer[LORA_MAX_PAYLOAD];
+	uint16_t size;
+} LoRaPayloadStruct_t;
+
+typedef struct 
+{
+    uint32_t txFreq;
+    uint8_t txPower;    
+    uint8_t BW;
+    uint8_t SF;
+    uint8_t CR;
+    uint32_t rxFreq;
+    uint32_t rxDelay;
+    uint32_t rxTimeout;
+} LoRaP2PParams_t;
+
+typedef struct 
+{
+    bool confirmed;
+    uint8_t port;
+} LoRaLRWTxParams_t;
+
+typedef struct 
+{
+    uint32_t upLinkCounter;
+    uint8_t channel;
+    uint16_t length;
+} LoRaLRWTxDoneParams_t;
+
+typedef struct 
+{
+    int16_t rssi;
+    int16_t snr;
+} LoRaP2PRxParams_t;
+
+typedef struct 
+{
+    uint32_t freq;
+    int16_t rssi;
+    int16_t snr;
+    uint8_t port;
+} LoRaLRWRxParams_t;
+
+typedef struct
+{
+    LoRaPayloadStruct_t payload;
+    LoRaP2PParams_t   params;
+} LoRaElementP2P_t;
+
+typedef struct
+{
+    LoRaPayloadStruct_t payload;
+    LoRaP2PRxParams_t   params;
+} LoRaElementP2PRx_t;
+
+typedef struct
+{
+    LoRaPayloadStruct_t payload;
+    LoRaLRWTxParams_t   params;
+} LoRaElementLRWTx_t;
+
+typedef struct
+{
+    LoRaPayloadStruct_t payload;
+    LoRaLRWTxParams_t   params;
+    LoRaLRWTxDoneParams_t done;
+} LoRaElementLRWTxDone_t;
+
+typedef struct
+{
+    LoRaPayloadStruct_t payload;
+    LoRaLRWRxParams_t   params;
+} LoRaElementLRWRx_t;
 
 typedef enum
 {
@@ -73,20 +156,16 @@ typedef enum
 	QUEUE_SEND_P2P,
 	QUEUE_SEND_LRW,
 	QUEUE_SEND_STATUS,
-} LoRa_Queue_t;
+} LoRaQueueType_t;
 
-typedef struct 
+typedef struct
 {
-	uint8_t	 payload[MAX_PAYLOAD_LORA];
-	uint16_t size;
-	int16_t rssi;
-	int16_t snr;
-} RX_Packet_t;
+    LoRaQueueType_t type;
+} LoRaQueueElement_t;
 
 void loraTask(void* param);
-void queueLRW();
-void queueP2P();
 uint8_t dallas_crc8(const uint8_t *pdata, const uint32_t size);
+
 #pragma pack(1)
 
  /* --------------- Command P2P --------------- */

@@ -7,15 +7,15 @@
 #include "stateMachine.hpp"
 
 hw_config hwConfig;
-QueueHandle_t xQueueLoRa;
+QueueHandle_t xQueueLoRa, xQueueSendP2P, xQueueSendLRW;
 
-loraEvents_t p2p, lrw;
-static LoRa_SM_t state = LORA_SM_WAIT_FOR_SEND, state_prev = LORA_SM_WAIT_FOR_SEND;
+static loraEvents_t _events;
+static LoRaSM_t state = LORA_SM_WAIT_FOR_SEND, state_prev = LORA_SM_WAIT_FOR_SEND;
 static TaskHandle_t xTaskToNotify = NULL;
 
 static uint8_t m_lora_app_data_buffer[LORAWAN_APP_DATA_BUFF_SIZE];			  ///< Lora user application data buffer.
 static lmh_app_data_t m_lora_app_data = {m_lora_app_data_buffer, 0, 0, 0, 0}; ///< Lora user application data structure.
-static lorawanTXParams_t lorawanTXParams;
+static lorawanTXParams_t lorawanTXParams; //variable to get lrw tx params
 
 static void lorawan_has_joined_handler(void);
 static void lorawan_confirm_class_handler(DeviceClass_t Class);
@@ -33,13 +33,12 @@ static lmh_callback_t lora_callbacks = {BoardGetBatteryLevel, BoardGetUniqueId, 
 
 static const char *TAG = "LoRaTask";
 
-static const LoRa_Queue_t p2pElement = QUEUE_SEND_P2P;
-static const LoRa_Queue_t lrwElement = QUEUE_SEND_LRW;
 
-static loraLRWRXParam_t _lrwRX;
-static loraLRWTXParam_t _lrwTX;
-static loraP2PTXParam_t _p2pTX;
-static loraP2PRXParam_t _p2pRX;
+static LoRaElementLRWRx_t _lrwRx;
+static LoRaElementP2PRx_t _p2pRx;
+
+static LoRaQueueElement_t p2pQueueElement = {.type = QUEUE_SEND_P2P};
+static LoRaQueueElement_t lrwQueueElement = {.type = QUEUE_SEND_LRW};
 
 #define LORA_BIT_P2P_TX_DONE		0x0001
 #define LORA_BIT_P2P_TX_TIMEOUT		0x0002
@@ -52,7 +51,7 @@ static loraP2PRXParam_t _p2pRX;
 #define LORA_BIT_LRW_RX_TIMEOUT		0x0100
 #define LORA_BIT_LRW_RX_ERROR		0x0200
 
-const char* printLoRaStateMachineState(LoRa_SM_t _status)
+const char* printLoRaStateMachineState(LoRaSM_t _status)
 {
 	switch(_status)
 	{
@@ -91,66 +90,75 @@ const char* printLoRaStateMachineState(LoRa_SM_t _status)
 	}
 }
 
-
-void p2pTXDone()
+void _eventsTXDone(bool isLRW)
 {
-	xTaskNotify(xTaskToNotify, LORA_BIT_P2P_TX_DONE, eSetBits);
+	if(isLRW)
+	{
+		xTaskNotify(xTaskToNotify, LORA_BIT_LRW_TX_DONE, eSetBits);
+	}
+	else
+	{
+		xTaskNotify(xTaskToNotify, LORA_BIT_P2P_TX_DONE, eSetBits);
+	}
 }
 
-void p2pTXTimeout(timeoutType_t type)
+void _eventsTXTimeout(bool isLRW, timeoutType_t type)
 {
-	xTaskNotify(xTaskToNotify, LORA_BIT_P2P_TX_TIMEOUT, eSetBits);
+	if(isLRW)
+	{
+		xTaskNotify(xTaskToNotify, LORA_BIT_LRW_TX_TIMEOUT, eSetBits);
+	}
+	else
+	{
+		xTaskNotify(xTaskToNotify, LORA_BIT_P2P_TX_TIMEOUT, eSetBits);
+	}
 }
 
-void p2pRXDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+void _eventsRXDone(bool isLRW, uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
-	printf("	[Pre notify] RX DONE\r\n");
-	memset(&_p2pRX, 0, sizeof(loraP2PRXParam_t));
+	if(isLRW)
+	{
+		xTaskNotify(xTaskToNotify, LORA_BIT_LRW_RX_DONE, eSetBits);
+	}
+	else
+	{
+		//copy payload to LoRaElement_t structure
+		memcpy(&_p2pRx.payload.buffer, payload, size );
+		_p2pRx.payload.size = size;
+		_p2pRx.params.rssi = rssi;
+		_p2pRx.params.snr = snr;
 
-	memcpy(&_p2pRX.buffer, payload, size );
-	_p2pRX.rssi = rssi;
-	_p2pRX.size = size;
-	_p2pRX.snr = snr;
-	esp_event_post(APP_EVENT, APP_EVENT_P2P_RX, (void*)&_p2pRX, sizeof(loraP2PRXParam_t), 0);
-	xTaskNotify(xTaskToNotify, LORA_BIT_P2P_RX_DONE, eSetBits);
+		//post event
+		esp_event_post(APP_EVENT, APP_EVENT_P2P_RX, (void*)&_p2pRx, sizeof(LoRaElementP2PRx_t), 0);
+		
+		//notify task
+		xTaskNotify(xTaskToNotify, LORA_BIT_P2P_RX_DONE, eSetBits);
+	}
 }
 
-void p2pRXTimeout(timeoutType_t type)
+void _eventsRXTimeout(bool isLRW, timeoutType_t type)
 {
-	printf("	[PRE NOTIFY] RX TIMEOUT\r\n");
-	xTaskNotify(xTaskToNotify, LORA_BIT_P2P_RX_TIMEOUT, eSetBits);
+	if(isLRW)
+	{
+		xTaskNotify(xTaskToNotify, LORA_BIT_LRW_RX_TIMEOUT, eSetBits);
+	}
+	else
+	{
+		xTaskNotify(xTaskToNotify, LORA_BIT_P2P_RX_TIMEOUT, eSetBits);
+	}
 }
 
-void p2pRXError()
+void _eventsRXError(bool isLRW)
 {
-	xTaskNotify(xTaskToNotify, LORA_BIT_P2P_RX_ERROR, eSetBits);
+	if(isLRW)
+	{
+		xTaskNotify(xTaskToNotify, LORA_BIT_LRW_RX_ERROR, eSetBits);
+	}
+	else
+	{
+		xTaskNotify(xTaskToNotify, LORA_BIT_P2P_RX_ERROR, eSetBits);
+	}
 }
-
-void lrwTXDone()
-{
-	xTaskNotify(xTaskToNotify, LORA_BIT_LRW_TX_DONE, eSetBits);
-}
-
-void lrwTXTimeout(timeoutType_t type)
-{
-	xTaskNotify(xTaskToNotify, LORA_BIT_LRW_TX_TIMEOUT, eSetBits);
-}
-
-void lrwRXDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
-{
-	xTaskNotify(xTaskToNotify, LORA_BIT_LRW_RX_DONE, eSetBits);
-}
-
-void lrwRXTimeout(timeoutType_t type)
-{
-	xTaskNotify(xTaskToNotify, LORA_BIT_LRW_RX_TIMEOUT, eSetBits);
-}
-
-void lrwRXError()
-{
-	xTaskNotify(xTaskToNotify, LORA_BIT_LRW_RX_ERROR, eSetBits);
-}
-
 
 static void lorawan_join_failed_handler(void)
 {
@@ -181,12 +189,6 @@ static void lorawan_confirm_class_handler(DeviceClass_t Class)
 
 static void lorawanRX(lmh_app_data_t *app_data)
 {
-	Serial.printf("[LORA] LRW downlink received port:%d, size:%d, rssi:%d, snr:%d\n",
-				  app_data->port, app_data->buffsize, app_data->rssi, app_data->snr);
-	for (uint8_t i = 0; i < app_data->buffsize; i++)
-		printf(" %02X ", *(app_data->buffer + i));
-	printf("}\r\n");
-
 	uint16_t size = 0;
 
 	if( (app_data->buffsize) > LORA_MAX_PAYLOAD )
@@ -194,15 +196,13 @@ static void lorawanRX(lmh_app_data_t *app_data)
 	else
 		size = app_data->buffsize;
 
-	memcpy(_lrwRX.buffer, app_data->buffer, size);
-	
-	_lrwRX.size = size;
-	_lrwRX.port = app_data->port;
-	_lrwRX.rssi = app_data->rssi;
-	_lrwRX.snr = app_data->snr;
+	memcpy(_lrwRx.payload.buffer, app_data->buffer, size);
+	_lrwRx.payload.size = size;
+	_lrwRx.params.port= app_data->port;
+	_lrwRx.params.rssi = app_data->rssi;
+	_lrwRx.params.snr = app_data->snr;
 
-
-	esp_event_post(APP_EVENT, APP_EVENT_LRW_RX, (void*)&_lrwRX, sizeof(loraLRWRXParam_t), 0);
+	esp_event_post(APP_EVENT, APP_EVENT_LRW_RX, (void*)&_lrwRx, sizeof(LoRaElementLRWRx_t), 0);
 
 	switch (app_data->port)
 	{
@@ -230,13 +230,6 @@ static void lorawanRX(lmh_app_data_t *app_data)
 		}
 		break;
 
-	case LRW_CMD_PORT:
-	{
-
-
-	}
-		break;
-
 	default:
 		break;
 	}
@@ -245,22 +238,23 @@ static void lorawanRX(lmh_app_data_t *app_data)
 static void app_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
-    // Isca_t *m_config = (Isca_t *) event_data;
+
     if (event_base == APP_EVENT && event_id == APP_EVENT_QUEUE_P2P_SEND)
     {
-        loraP2PTXParam_t *p2pTX_p = (loraP2PTXParam_t*) event_data;
+		LoRaElementP2P_t *element_p = (LoRaElementP2P_t*) event_data;
+		LoRaElementP2P_t _p2pTx;
 
-		memset(&_p2pTX, 0, sizeof(loraP2PTXParam_t));
-		memcpy(&_p2pTX, p2pTX_p, sizeof(loraP2PTXParam_t));
-		xQueueSend(xQueueLoRa, &p2pElement, 0);
+		memcpy(&_p2pTx, element_p, sizeof(LoRaElementP2P_t));
+		xQueueSend(xQueueSendP2P, &_p2pTx, 0);
+		xQueueSend(xQueueLoRa, &p2pQueueElement, 0);
     }
     if (event_base == APP_EVENT && event_id == APP_EVENT_QUEUE_LRW_SEND)
     {
-		loraLRWTXParam_t *lrwTX_p = (loraLRWTXParam_t*) event_data;
-
-		memset(&_lrwTX, 0, sizeof(loraLRWTXParam_t));
-		memcpy(&_lrwTX, lrwTX_p, sizeof(loraLRWTXParam_t));
-		xQueueSend(xQueueLoRa, &lrwElement, 0);
+		LoRaElementLRWTx_t *element_p = (LoRaElementLRWTx_t*) event_data;
+		LoRaElementLRWTx_t _lrwTx;
+		memcpy(&_lrwTx, element_p, sizeof(LoRaElementLRWTx_t));
+		xQueueSend(xQueueSendLRW, &_lrwTx, 0);
+		xQueueSend(xQueueLoRa, &lrwQueueElement, 0);
     }
 
 }
@@ -269,9 +263,11 @@ void loraTask(void* param)
 {
 	
 	Isca_t *config = (Isca_t*) param;
-	LoRa_Queue_t typeSendLoRa = QUEUE_NONE;
+	LoRaQueueElement_t loraQueueElement2Send = {.type = QUEUE_NONE};
     
-	xQueueLoRa = xQueueCreate( 10, sizeof( LoRa_Queue_t ) );
+	xQueueLoRa = xQueueCreate( 10, sizeof( LoRaQueueElement_t ) );
+	xQueueSendP2P = xQueueCreate(5, sizeof(LoRaElementP2P_t));
+	xQueueSendLRW = xQueueCreate(5, sizeof(LoRaElementLRWTx_t));
 	xTaskToNotify = xTaskGetCurrentTaskHandle();
 	// Define the HW configuration between MCU and SX126x
 	hwConfig.CHIP_TYPE = SX1262_CHIP;		  // Example uses an eByte E22 module with an SX1262
@@ -305,21 +301,13 @@ void loraTask(void* param)
 	lmh_setAppSKey(config->nodeAppsKey);
 	lmh_setDevAddr(config->nodeDevAddr);
 
-	p2p.TxDone = p2pTXDone;
-	p2p.TxTimeout = p2pTXTimeout;
-	p2p.RxDone = p2pRXDone;
-	p2p.RxTimeout = p2pRXTimeout;
-	p2p.RxError = p2pRXError;
+	_events.TxDone = _eventsTXDone;
+	_events.TxTimeout = _eventsTXTimeout;
+	_events.RxDone = _eventsRXDone;
+	_events.RxTimeout = _eventsRXTimeout;
+	_events.RxError = _eventsRXError;
 
-	setP2PEvents(&p2p);
-
-	lrw.TxDone = lrwTXDone;
-	lrw.TxTimeout = lrwTXTimeout;
-	lrw.RxDone = lrwRXDone;
-	lrw.RxTimeout = lrwRXTimeout;
-	lrw.RxError = lrwRXError;
-
-	setLRWEvents(&lrw);
+	setLoRaEvents(&_events);
 
 	// Initialize LoRaWan
 	err_code = lmh_init(&lora_callbacks, lora_param_init, false, CLASS_A, LORAMAC_REGION_AU915);
@@ -332,6 +320,8 @@ void loraTask(void* param)
 	lmh_join();
 	uint32_t ulNotifiedValue = 0;
 	const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 10000 );
+	LoRaElementP2P_t p2pElement;
+	LoRaElementLRWTx_t lrwElement;
     while(1)
     {
         ESP_LOGI(TAG, "%s", printLoRaStateMachineState(state));
@@ -340,13 +330,13 @@ void loraTask(void* param)
 			case LORA_SM_WAIT_FOR_SEND:
 				
 				printf("\r\n");
-				if( xQueueReceive( xQueueLoRa, &( typeSendLoRa ), portMAX_DELAY ) == pdPASS )
+				if( xQueueReceive( xQueueLoRa, &( loraQueueElement2Send ), portMAX_DELAY ) == pdPASS )
 				{
-					if(typeSendLoRa == QUEUE_SEND_P2P)
+					if(loraQueueElement2Send.type == QUEUE_SEND_P2P)
 					{
 						state = LORA_SM_P2P_TX;
 					}
-					else if (typeSendLoRa == QUEUE_SEND_LRW)
+					else if (loraQueueElement2Send.type == QUEUE_SEND_LRW)
 					{
 						state = LORA_SM_LRW_TX;
 					}
@@ -361,7 +351,7 @@ void loraTask(void* param)
 				{
 					xTaskNotifyWait( pdFALSE, pdFALSE, &ulNotifiedValue, xMaxBlockTime );
 				}
-				ESP_LOGW(TAG, "Task Notify: %03lX", ulNotifiedValue);
+				ESP_LOGI(TAG, "flags: %03lX", ulNotifiedValue);
 
 				if( ( ulNotifiedValue & LORA_BIT_P2P_TX_DONE ) != 0 )
 				{
@@ -430,72 +420,85 @@ void loraTask(void* param)
 
 			case LORA_SM_P2P_TX:
 			{
-				if(Radio.GetStatus() == RF_RX_RUNNING)
+				if(xQueueReceive(xQueueSendP2P, &p2pElement, pdMS_TO_TICKS(10)) == pdPASS)
 				{
-					ESP_LOGI(TAG,"RX Running");
-					Radio.Standby();
-				
-					switch(Radio.GetStatus())
+					if(Radio.GetStatus() == RF_RX_RUNNING)
 					{
-						case RF_RX_RUNNING:
-						ESP_LOGI(TAG,"RF_RX_RUNNING");
-						break;
+						ESP_LOGI(TAG,"RX Running");
+						Radio.Standby();
+					
+						switch(Radio.GetStatus())
+						{
+							case RF_RX_RUNNING:
+							ESP_LOGI(TAG,"RF_RX_RUNNING");
+							break;
 
-						case RF_IDLE:
-						ESP_LOGI(TAG,"RF_IDLE");
-						break;
-						
-						case RF_TX_RUNNING:
-						ESP_LOGI(TAG,"RF_TX_RUNNING");
-						break;
-						
-						case RF_CAD:
-						ESP_LOGI(TAG,"RF_CAD");
-						break;
+							case RF_IDLE:
+							ESP_LOGI(TAG,"RF_IDLE");
+							break;
+							
+							case RF_TX_RUNNING:
+							ESP_LOGI(TAG,"RF_TX_RUNNING");
+							break;
+							
+							case RF_CAD:
+							ESP_LOGI(TAG,"RF_CAD");
+							break;
 
+						}
 					}
-				}
 
-				MibRequestConfirm_t mibReq;
-				mibReq.Type = MIB_PUBLIC_NETWORK;
-				mibReq.Param.EnablePublicNetwork = false;
-				LoRaMacMibSetRequestConfirm(&mibReq);
-				
-				// Set Radio TX configuration
-				Radio.SetChannel(_p2pTX.freq);
-				Radio.SetTxConfig(MODEM_LORA, _p2pTX.txPower, 0, _p2pTX.BW,
-								_p2pTX.SF, _p2pTX.CR,
-								LORA_PREAMBLE_LENGTH, LORA_FIX_LENGTH_PAYLOAD_ON,
-								true, 0, 0, LORA_IQ_INVERSION_ON, TX_TIMEOUT_VALUE);
-				
-				Radio.Send(_p2pTX.buffer, _p2pTX.size);
-				char payload[256] = {'0'};
-				for(int i = 0; i < _p2pTX.size; i++)
+					MibRequestConfirm_t mibReq;
+					mibReq.Type = MIB_PUBLIC_NETWORK;
+					mibReq.Param.EnablePublicNetwork = false;
+					LoRaMacMibSetRequestConfirm(&mibReq);
+					
+					// Set Radio TX configuration
+					Radio.SetChannel(p2pElement.params.txFreq);
+					Radio.SetTxConfig(MODEM_LORA, p2pElement.params.txPower, 0, p2pElement.params.BW,
+									p2pElement.params.SF, p2pElement.params.CR,
+									LORA_PREAMBLE_LENGTH, LORA_FIX_LENGTH_PAYLOAD_ON,
+									true, 0, 0, LORA_IQ_INVERSION_ON, TX_TIMEOUT_VALUE);
+					
+					Radio.Send(p2pElement.payload.buffer, p2pElement.payload.size);
+					
+					// ESP_LOG_BUFFER_HEX("P2P SENT", p2pElement.payload.buffer, p2pElement.payload.size);
+					char payload[256];
+					for(int i = 0; i < p2pElement.payload.size; i++)
+					{
+						snprintf(&payload[i*3], 256, "%02X ", p2pElement.payload.buffer[i]);
+					}
+					payload[p2pElement.payload.size * 3] = 0x00;
+					ESP_LOGI(TAG, "P2P SENT: %s", payload);
+
+					state = LORA_SM_WAIT_FOR_TIMEOUT;
+				}
+				else
 				{
-					sprintf(payload + strlen(payload), "%02X", _p2pTX.buffer[i]);
+					state = LORA_SM_WAIT_FOR_SEND;
 				}
-
-				ESP_LOGW(TAG, "P2P SENT: %s", payload);
 
 				state_prev = LORA_SM_P2P_TX;
-				state = LORA_SM_WAIT_FOR_TIMEOUT;
 				break;
 			}
 
 			case LORA_SM_P2P_TX_DONE:
-				
-				if(_p2pTX.delayRX)
-					vTaskDelay(pdMS_TO_TICKS(_p2pTX.delayRX));
+				{
+					esp_event_post(APP_EVENT, APP_EVENT_P2P_TX_DONE, (void*)&p2pElement, sizeof(LoRaElementP2P_t), 0);
+					
+					if(p2pElement.params.rxDelay)
+						vTaskDelay(pdMS_TO_TICKS(p2pElement.params.rxDelay));
 
-				Radio.SetChannel(_p2pTX.freqRX);
-				Radio.SetRxConfig(MODEM_LORA, _p2pTX.BW, _p2pTX.SF,
-				 _p2pTX.CR, 0, LORA_PREAMBLE_LENGTH,
-				LORA_SYMBOL_TIMEOUT, LORA_FIX_LENGTH_PAYLOAD_ON, 0, true, 0, 0,
-				LORA_IQ_INVERSION_ON, true);
-				Radio.Rx(_p2pTX.timeoutRX);
+					Radio.SetChannel(p2pElement.params.rxFreq);
+					Radio.SetRxConfig(MODEM_LORA, p2pElement.params.BW, p2pElement.params.SF,
+					p2pElement.params.CR, 0, LORA_PREAMBLE_LENGTH,
+					LORA_SYMBOL_TIMEOUT, LORA_FIX_LENGTH_PAYLOAD_ON, 0, true, 0, 0,
+					LORA_IQ_INVERSION_ON, true);
+					Radio.Rx(p2pElement.params.rxTimeout);
 
-				state_prev = LORA_SM_P2P_TX_DONE;
-				state = LORA_SM_WAIT_FOR_TIMEOUT;
+					state_prev = LORA_SM_P2P_TX_DONE;
+					state = LORA_SM_WAIT_FOR_TIMEOUT;
+				}
 				break;
 
 
@@ -511,50 +514,69 @@ void loraTask(void* param)
 
 			case LORA_SM_LRW_TX:
 			{
-				MibRequestConfirm_t mibReq;
-				mibReq.Type = MIB_PUBLIC_NETWORK;
-				mibReq.Param.EnablePublicNetwork = true;
-				LoRaMacMibSetRequestConfirm(&mibReq);
-				
-				if (lmh_join_status_get() != LMH_SET)
+				if(xQueueReceive(xQueueSendLRW, &lrwElement, pdMS_TO_TICKS(10)) == pdPASS)
 				{
-					//Not joined, try again later
-					ESP_LOGE(TAG, "Did not join network, skip sending frame");
-					return;
-				}
-
-				memset(m_lora_app_data_buffer, 0, sizeof(m_lora_app_data_buffer));
-				m_lora_app_data.port = _lrwTX.port;
-				memcpy(m_lora_app_data_buffer, _lrwTX.buffer, _lrwTX.size);
-				m_lora_app_data.buffsize = _lrwTX.size;
-
-				lmh_error_status error = lmh_send(&m_lora_app_data, (lmh_confirm) _lrwTX.confirmed);
-				
-				if (error == LMH_SUCCESS)
-				{	
-					char payload[256] = {'0'};
-					for(int i = 0; i < m_lora_app_data.buffsize; i++)
+					MibRequestConfirm_t mibReq;
+					mibReq.Type = MIB_PUBLIC_NETWORK;
+					mibReq.Param.EnablePublicNetwork = true;
+					LoRaMacMibSetRequestConfirm(&mibReq);
+					
+					if (lmh_join_status_get() != LMH_SET)
 					{
-						sprintf(payload + strlen(payload), "%02X", m_lora_app_data.buffer[i]);
+						//Not joined, try again later
+						ESP_LOGE(TAG, "Did not join network, skip sending frame");
+						return;
+					}
+					
+					memset(m_lora_app_data_buffer, 0, sizeof(m_lora_app_data_buffer));
+					
+					memcpy(m_lora_app_data_buffer, lrwElement.payload.buffer, lrwElement.payload.size);
+					m_lora_app_data.buffsize = lrwElement.payload.size;
+					m_lora_app_data.port = lrwElement.params.port;
+
+					lmh_error_status error = lmh_send(&m_lora_app_data, (lmh_confirm) lrwElement.params.confirmed);
+					
+					if (error == LMH_SUCCESS)
+					{	
+						char payload[256];
+						for(int i = 0; i < m_lora_app_data.buffsize; i++)
+						{
+							snprintf(&payload[i*3], 256, "%02X ", m_lora_app_data.buffer[i]);
+						}
+						payload[m_lora_app_data.buffsize * 3] = 0x00;
+						ESP_LOGI(TAG, "LRW SENT: %s", payload);
 					}
 
-					ESP_LOGW(TAG, "LRW SENT: %s", payload);
+					memset(m_lora_app_data_buffer, 0, sizeof(m_lora_app_data_buffer));
+				
+					state = LORA_SM_WAIT_FOR_TIMEOUT;
 				}
-
-				memset(m_lora_app_data_buffer, 0, sizeof(m_lora_app_data_buffer));
-			
+				else
+				{
+					state = LORA_SM_WAIT_FOR_SEND;
+				}
 				state_prev = LORA_SM_LRW_TX;
-				state = LORA_SM_WAIT_FOR_TIMEOUT;
 				break;
 			}
 
 			case LORA_SM_LRW_TX_DONE:
-				
-				ESP_LOGW(TAG, "UpLinkCounter: %ld | Channel: %d | Lenght: %d", 
+			{
+				LoRaElementLRWTxDone_t elementTxDone;
+
+				memcpy(&elementTxDone.payload, &lrwElement.payload, sizeof(lrwElement.payload));
+				memcpy(&elementTxDone.params, &lrwElement.params, sizeof(lrwElement.params));
+				elementTxDone.done.channel = lorawanTXParams.channel;
+				elementTxDone.done.length = lorawanTXParams.PktLen;
+				elementTxDone.done.upLinkCounter = lorawanTXParams.UpLinkCounter;
+
+				esp_event_post(APP_EVENT, APP_EVENT_LRW_TX_DONE, (void*)&elementTxDone, sizeof(LoRaElementLRWTxDone_t), 0);
+
+				ESP_LOGI(TAG, "UpLinkCounter: %ld | Channel: %d | Lenght: %d", 
 					lorawanTXParams.UpLinkCounter, lorawanTXParams.channel, lorawanTXParams.PktLen);
 				
 				state_prev = LORA_SM_LRW_TX_DONE;
 				state = LORA_SM_WAIT_FOR_TIMEOUT;
+			}
 				break;
 			
 			case LORA_SM_P2P_RX_TIMEOUT:
@@ -566,7 +588,7 @@ void loraTask(void* param)
 			case LORA_SM_LRW_RX_TIMEOUT:
 			{
 				static uint8_t count = 0;
-				if(count == 1)
+				if(count >= 1)
 				{
 					count = 0;
 					state = LORA_SM_WAIT_FOR_SEND;
