@@ -58,7 +58,7 @@ typedef struct
 {
     uint8_t statusBattery : 2;
     uint8_t lastResetReason : 5;
-    uint8_t reserved : 1;
+    uint8_t powerSupply : 1;
     uint8_t emergency : 1;
     uint8_t lowBattery : 1;
     uint8_t jammer : 1;
@@ -89,14 +89,13 @@ typedef struct
     int16_t batteryMiliVolts;
     int8_t temperatureCelsius;
     uint32_t reset;
-    uint8_t batteryStatus;
     uint64_t lastP2PTick;
     uint64_t lastLRWTick;
     uint64_t P2PAlarm;
     uint64_t LRWAlarm;
     uint8_t P2PCount;
     int32_t acc[3];
-    float temp;
+    float temperatureFloat;
     
     //otp
     uint8_t hwVer;

@@ -1,6 +1,7 @@
 #include "stateMachine.hpp"
 #include "esp_timer.h"
 #include "lora.hpp"
+#include "sensors.hpp"
 
 static Isca_t *m_config;
 static bool resetRequested = false;
@@ -19,6 +20,7 @@ static LoRaElementLRWRx_t lrwRx;
 static LoRaElementP2PRx_t p2pRx;
 static LoRaElementP2P_t p2pTx, p2pTxDone;
 static LoRaElementLRWTxDone_t lrwTxDone;
+static SensorsStatus_t _sensorStatus; 
 
 // APP event base declaration
 ESP_EVENT_DECLARE_BASE(APP_EVENT);
@@ -29,9 +31,11 @@ ESP_EVENT_DECLARE_BASE(APP_EVENT);
 #define BIT_P2P_RX  0x08
 #define BIT_P2P_TX_DONE 0x10
 #define BIT_LRW_TX_DONE 0x20
-
+#define BIT_SENSORS_STATUS 0x40
+#define BIT_LRW_REQ_TX_STATUS 0x80
 
 void stopLoRaTimers();
+void lorawanRX(LoRaElementLRWRx_t* _lrwRx);
 
 uint8_t dallas_crc8(const uint8_t *pdata, const uint32_t size)
 {
@@ -145,6 +149,7 @@ void resetRequest()
 void sendStatus()
 {
 	printf("[SM] Warning! Status Requested\r\n");
+    esp_event_post(APP_EVENT, APP_EVENT_REQ_LRW_SEND_STATUS, (void*)NULL, 0, 0);
 	//queueSend(QUEUE_SEND_STATUS);
 }
 
@@ -395,14 +400,34 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
         uint64_t now = esp_timer_get_time();
         if(now - m_config->lastLRWTick > 10000000 )
         {
-            m_config->lastP2PTick = now;
+            m_config->lastLRWTick = now;
             xTaskNotify(xTaskToNotify, BIT_LRW_REQ_TX, eSetBits);
         }
     }
 
-}
+    if(event_base == APP_EVENT && event_id == APP_EVENT_REQ_LRW_SEND_STATUS)
+    {
+        xTaskNotify(xTaskToNotify, BIT_LRW_REQ_TX_STATUS, eSetBits);
+    }
 
-void lorawanRX(LoRaElementLRWRx_t* _lrwRx);
+    if(event_base == APP_EVENT && event_id == APP_EVENT_SENSORS_STATUS)
+    {
+        SensorsStatus_t *_sensorStatus_p = (SensorsStatus_t*) event_data;
+        memcpy(&_sensorStatus,_sensorStatus_p, sizeof(SensorsStatus_t) );
+        xTaskNotify(xTaskToNotify, BIT_SENSORS_STATUS, eSetBits);
+    }
+
+    if(event_base == APP_EVENT && event_id == APP_EVENT_MOVEMENT)
+    {
+        bool *mov_p = (bool*) event_data;
+        m_config->flags.asBit.movement = *mov_p;
+        if(*mov_p == true)
+            printf("        [STATE] MOVEMENT: TRUE\r\n");
+        else
+            printf("        [STATE] MOVEMENT: FALSE\r\n");
+    }
+
+}
 
 void stateTask (void* pvParameters)
 {
@@ -429,7 +454,7 @@ void stateTask (void* pvParameters)
     ESP_ERROR_CHECK(esp_timer_create(&lrwTimerArgs, &lrwTimer));
         
     m_config->p2pStpEmer = 0x1E;
-    m_config->p2pStpNorm = 0x3C;
+    m_config->p2pStpNorm = 0x05;
     m_config->lrwStpEmer = 0x1E;
     m_config->lrwStpNorm = 0x3C;
     
@@ -487,6 +512,12 @@ void stateTask (void* pvParameters)
                     ulTaskNotifyValueClear( xTaskToNotify, BIT_LRW_REQ_TX );
                     ulNotifiedValue &= ~BIT_LRW_REQ_TX;
                 }
+                else if ((ulNotifiedValue & BIT_LRW_REQ_TX_STATUS) != 0)
+                {
+                    state = SM_SEND_LRW_STATUS;
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_LRW_REQ_TX_STATUS );
+                    ulNotifiedValue &= ~BIT_LRW_REQ_TX_STATUS;
+                }
                 else if( ( ulNotifiedValue & BIT_LRW_TX_DONE ) != 0 )
                 {
                     state = SM_SEND_LRW_DONE;
@@ -498,6 +529,12 @@ void stateTask (void* pvParameters)
                     state = SM_RCV_LRW;
                     ulTaskNotifyValueClear( xTaskToNotify, BIT_LRW_RX );
                     ulNotifiedValue &= ~BIT_LRW_RX;
+                } 
+                else if( ( ulNotifiedValue & BIT_SENSORS_STATUS) != 0 )
+                {
+                    state = SM_SENSORS_STATUS;
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_SENSORS_STATUS );
+                    ulNotifiedValue &= ~BIT_SENSORS_STATUS;
                 }
 
             }
@@ -519,12 +556,13 @@ void stateTask (void* pvParameters)
                 pos.param.flags.batteryVoltageInfos = 2;
 
                 pos.param.batteryVoltage = (uint8_t)(P2PBattery < 0 ? (P2PBattery - 0.5) : (P2PBattery + 0.5));;
-                pos.param.flags.accelerometerStatus = 0;
+                pos.param.flags.accelerometerStatus = m_config->flags.asBit.movement;
                 pos.param.flags.criticalBatteryStatus = m_config->flags.asBit.lowBattery;
-                pos.param.flags.powerSupplyStatus = 0;
+                pos.param.flags.powerSupplyStatus = m_config->flags.asBit.powerSupply;
                 pos.param.flags.emergencyStatus = m_config->flags.asBit.emergency;
                 pos.param.header.sequenceNumber = counter;
 
+                m_config->P2PCount = counter;
                 if (counter++ > 63)
                     counter = 0;
 
@@ -553,10 +591,17 @@ void stateTask (void* pvParameters)
 
             case SM_SEND_P2P_DONE:
             {
-                //static LoRaElementP2P_t p2pTx, p2pTxDone;
+                char payload[256];
+                for(int i = 0; i < p2pTxDone.payload.size; i++)
+                {
+                    snprintf(&payload[i*3], 256, "%02X ",p2pTxDone.payload.buffer[i]);
+                }
+                payload[p2pTxDone.payload.size * 3] = 0x00;
+                printf("[LORA] P2P TX: %s\r\n", payload);
+
                 PositionP2PUnion_t pos;
                 memcpy(&pos, p2pTxDone.payload.buffer, sizeof(PositionP2PUnion_t));
-                printf("[LORA] PARSE P2P TX Counter: %02d | ", pos.param.header.sequenceNumber);
+                printf("[LORA] PARSE P2P TX Counter: %02u | ", pos.param.header.sequenceNumber);
                 printf("LoraID: %.2X%.2X%.2X | ", pos.param.loraId[0], pos.param.loraId[1], pos.param.loraId[2]);
                 printf("Batt: %.2X | ", pos.param.batteryVoltage);
                 printf("Accelerometer: %s | ", (pos.param.flags.accelerometerStatus) ? "ON" : "OFF");
@@ -572,6 +617,14 @@ void stateTask (void* pvParameters)
                 LoRaElementP2PRx_t _rx;
                 if(xQueueReceive(xQueueP2PRx, &_rx, 10) == pdPASS)
                 {
+                    char payload[256];
+					for(int i = 0; i < _rx.payload.size; i++)
+					{
+						snprintf(&payload[i*3], 256, "%02X ", _rx.payload.buffer[i]);
+					}
+					payload[_rx.payload.size * 3] = 0x00;
+                    printf("[LORA] P2P RCV: %s\r\n", payload);
+
                     if(_rx.payload.size == sizeof(CommandP2P_t))
                     {
                         CommandP2PUnion_t commandReceived;
@@ -640,15 +693,116 @@ void stateTask (void* pvParameters)
             }
             break;
 
+            case SM_SEND_LRW_STATUS:
+            {
+                static uint32_t count = 0;
+
+                lrwTx.params.port = m_config->lrwPosPort;
+                lrwTx.params.confirmed = m_config->lrwConfirmed;
+
+                memset(&lrwTx.payload.buffer, 0, sizeof(lrwTx.payload.buffer));
+
+                DoubleWordArrayUnion_t timeArray[4];
+
+                timeArray[0].doubleWord = (uint64_t)(m_config->p2pMovNorm)<<20 | m_config->p2pMovEmer;
+                timeArray[1].doubleWord = (uint64_t)(m_config->p2pStpNorm)<<20 | m_config->p2pStpEmer;
+                timeArray[2].doubleWord = (uint64_t)(m_config->lrwMovNorm)<<20 | m_config->lrwMovEmer;
+                timeArray[3].doubleWord = (uint64_t)(m_config->lrwStpNorm)<<20 | m_config->lrwStpEmer;
+
+                uint8_t timesPayload[20] = {};
+
+                int x = 0, y = 4;
+                for (int z = 0; z < 20; z++)
+                {
+                    x = z/5;
+                    timesPayload[z] = timeArray[x].array[y];
+                    if(--y < 0)
+                        y = 4;
+                }
+
+                lrwTx.payload.buffer[0] = m_config->lrwProtocol;
+                lrwTx.payload.buffer[1] = m_config->hwVer;
+                lrwTx.payload.buffer[2] = m_config->fwVerProtocol;
+                lrwTx.payload.buffer[3] = (m_config->loraId >> 16) & 0xFF;
+                lrwTx.payload.buffer[4] = (m_config->loraId >> 8) & 0xFF;
+                lrwTx.payload.buffer[5] = m_config->loraId & 0xFF;
+                lrwTx.payload.buffer[6] = m_config->temperatureCelsius;
+                lrwTx.payload.buffer[7] = (uint8_t)((m_config->batteryMiliVolts & 0xFF00)>>8);
+                lrwTx.payload.buffer[8] = (uint8_t)(m_config->batteryMiliVolts & 0x00FF);
+                lrwTx.payload.buffer[9] = m_config->flags.asArray[0];
+                lrwTx.payload.buffer[10] = m_config->flags.asArray[1];
+
+                for(int k = 0; k < 20; k++)
+                {
+                    lrwTx.payload.buffer[k + 11] = timesPayload[k];
+                }
+                lrwTx.payload.buffer[31] = m_config->blePower;
+                lrwTx.payload.buffer[32] = (m_config->bleAdvTime & 0xff00) >> 8;
+                lrwTx.payload.buffer[33] = (m_config->bleAdvTime & 0xff);
+
+                lrwTx.payload.size = 34;
+
+                esp_event_post(APP_EVENT, APP_EVENT_QUEUE_LRW_SEND, &lrwTx, sizeof(LoRaElementLRWTx_t), 0);
+
+                
+
+                state = SM_WAIT_FOR_EVENT;
+            }
+            break;
+
             case SM_SEND_LRW_DONE:
             {
-                //static LoRaElementLRWTxDone_t lrwTxDone;
+                char payload[256];
+                for(int i = 0; i < lrwTxDone.payload.size; i++)
+                {
+                    snprintf(&payload[i*3], 256, "%02X ",lrwTxDone.payload.buffer[i]);
+                }
+                payload[lrwTxDone.payload.size * 3] = 0x00;
+                printf("[LORA] LRW TX: %s\r\n", payload);
+
                 printf("[LORA] LRW TX Uplink: %ld | channel: %d | length: %d \r\n", lrwTxDone.done.upLinkCounter, lrwTxDone.done.channel, lrwTxDone.done.length);
-				printf("[LORA] PARSE TX LRW Protocol Version: %02X | ", lrwTxDone.payload.buffer[0]);
-				printf("LoRaID: %02X %02X %02X | ", lrwTxDone.payload.buffer[1], lrwTxDone.payload.buffer[2], lrwTxDone.payload.buffer[3]);
-				printf("Temp: 0x%02X = %d | ", lrwTxDone.payload.buffer[4], lrwTxDone.payload.buffer[4]);
-				printf("Battery: %d mV | ", (int)((lrwTxDone.payload.buffer[5]<<8) + lrwTxDone.payload.buffer[6]));
-				printf("Flags: %02X %02X\r\n", lrwTxDone.payload.buffer[7], lrwTxDone.payload.buffer[8]);
+				
+                if(lrwTxDone.payload.size == 9)
+                {
+                    printf("[LORA] PARSE TX LRW Protocol Version: %02X | ", lrwTxDone.payload.buffer[0]);
+                    printf("LoRaID: %02X %02X %02X | ", lrwTxDone.payload.buffer[1], lrwTxDone.payload.buffer[2], lrwTxDone.payload.buffer[3]);
+                    printf("Temp: 0x%02X = %d | ", lrwTxDone.payload.buffer[4], lrwTxDone.payload.buffer[4]);
+                    printf("Battery: %d mV | ", (int)((lrwTxDone.payload.buffer[5]<<8) + lrwTxDone.payload.buffer[6]));
+                    printf("Flags: %02X %02X\r\n", lrwTxDone.payload.buffer[7], lrwTxDone.payload.buffer[8]);
+
+                }
+                else if (lrwTxDone.payload.size == 34)
+                {
+                    printf("[LORA] PARSE LRW Status | Protocol Version: 0x%02X | ", lrwTxDone.payload.buffer[0]);
+                    printf("HW Ver: 0x%02X | FW Ver: 0x%02X |\r\n", lrwTxDone.payload.buffer[1], lrwTxDone.payload.buffer[2]);
+                    printf("| LoRaID: 0x%02lX%02lX%02lX = %ld | ", lrwTxDone.payload.buffer[3], lrwTxDone.payload.buffer[4], \
+                                                                lrwTxDone.payload.buffer[5], 
+                                                                (lrwTxDone.payload.buffer[3]<<16 + lrwTxDone.payload.buffer[4]<<8 + lrwTxDone.payload.buffer[5]));
+                    printf("Temp: 0x%02X = %d | ", lrwTxDone.payload.buffer[6], lrwTxDone.payload.buffer[6]);
+                    printf("Battery: 0x%02X%02X = %d mV | ", lrwTxDone.payload.buffer[7], lrwTxDone.payload.buffer[8],
+                                                    lrwTxDone.payload.buffer[7]<<8 + lrwTxDone.payload.buffer[8]);
+                    printf("Flags: 0x%02X%02X |\r\n", lrwTxDone.payload.buffer[9], lrwTxDone.payload.buffer[10]);
+                    printf("| Emergency: %s | LowBattery: %s | Jammer: %s | Movement: %s |\r\n",
+                            m_config->flags.asBit.emergency?"ON":"OFF", m_config->flags.asBit.lowBattery?"ON":"OFF",
+                            m_config->flags.asBit.jammer?"ON":"OFF", m_config->flags.asBit.movement?"ON":"OFF");
+                    printf("| BLE: %s | StockMode: %s | Output: %s | Input: %s |\r\n",
+                            m_config->flags.asBit.bleStatus?"ON":"OFF", m_config->flags.asBit.stockMode?"ON":"OFF",
+                            m_config->flags.asBit.output?"ON":"OFF", m_config->flags.asBit.input?"ON":"OFF");
+                    printf("| StatusBattery: 0x%02X = %d | LastResetReason: 0x%02X = %d | PowerSupply: 0x%02X = %d |\r\n",
+                            m_config->flags.asBit.statusBattery, m_config->flags.asBit.statusBattery,
+                            m_config->flags.asBit.lastResetReason, m_config->flags.asBit.lastResetReason,
+                            m_config->flags.asBit.powerSupply, m_config->flags.asBit.powerSupply);
+                    printf("| p2pMovNormal: 0x%05X = %d | p2pMovEmerg: 0x%05X = %d | p2pStpNormal: 0x%05X = %d | p2pStpEmerg: 0x%05X = %d |\r\n",\
+                            m_config->p2pMovNorm, m_config->p2pMovNorm, m_config->p2pMovEmer, m_config->p2pMovEmer,
+                            m_config->p2pStpNorm, m_config->p2pStpNorm, m_config->p2pStpEmer, m_config->p2pStpEmer);
+                    printf("| lrwMovNormal: 0x%05X = %d | lrwMovEmerg: 0x%05X = %d | lrwStpNormal: 0x%05X = %d | lrwStpEmerg: 0x%05X = %d |\r\n",\
+                            m_config->lrwMovNorm, m_config->lrwMovNorm, m_config->lrwMovEmer, m_config->lrwMovEmer,
+                            m_config->lrwStpNorm, m_config->lrwStpNorm, m_config->lrwStpEmer, m_config->lrwStpEmer);
+                    printf("| BLE Power: 0x%02X = %d | BLE Time: 0x%04X = %d | \r\n", m_config->blePower, m_config->blePower,
+                        m_config->bleAdvTime, m_config->bleAdvTime);
+
+                }
+                
                 
                 state = SM_WAIT_FOR_EVENT;
             }
@@ -690,8 +844,37 @@ void stateTask (void* pvParameters)
                 state = SM_UPDATE_TIMERS;
             break;
 
+            case SM_SENSORS_STATUS:
+                memcpy(m_config->acc, _sensorStatus.acc, sizeof(m_config->acc));
+                m_config->temperatureFloat = _sensorStatus.temperature;
+                m_config->temperatureCelsius = (int8_t)(_sensorStatus.temperature < 0 ? (_sensorStatus.temperature - 0.5) : (_sensorStatus.temperature + 0.5));
+                m_config->flags.asBit.statusBattery = _sensorStatus.batStatus;
+                m_config->batteryMiliVolts = _sensorStatus.batVoltage;
+                if(_sensorStatus.batVoltage <= BATT_CRITICAL_VOLTAGE)
+                {
+                    m_config->flags.asBit.lowBattery = 1;
+                }
+                else
+                {
+                    m_config->flags.asBit.lowBattery = 0;
+                }
+                
+                if(m_config->flags.asBit.statusBattery == BAT_DISCHARGING)
+                {
+                    m_config->flags.asBit.powerSupply = 0;   
+                }
+                else
+                {
+                    m_config->flags.asBit.powerSupply = 1;
+                }
+
+                ESP_LOGW(TAG, "[ACC](mg) x:%ld | y:%ld | z:%ld | [TEMP]: %02.2foC | [batVoltage]: %04dmV | [batStatus]: %s", 
+                    m_config->acc[0], m_config->acc[1],m_config->acc[2],  m_config->temperatureFloat, m_config->batteryMiliVolts,
+                    printBatStatus((SensorsBatStatus_t)m_config->flags.asBit.statusBattery));
+                
+                state = SM_WAIT_FOR_EVENT;
+            break;
         }
-        //vTaskDelay(1000);
     }
 }
 const char* getCMDString(CommandLRWDict_t command)
@@ -746,6 +929,7 @@ void lorawanRX(LoRaElementLRWRx_t* _lrwRx)
 	for (uint8_t i = 0; i < _lrwRx->payload.size; i++)
 		printf(" %02X ", _lrwRx->payload.buffer[i]);
 	printf("}\r\n");
+    
     if(rxParams->port == LRW_CMD_PORT)
     {
         uint8_t pktCounter = 0;

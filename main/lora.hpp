@@ -11,6 +11,8 @@
 #define LORA_FIX_LENGTH_PAYLOAD_ON false
 #define LORA_IQ_INVERSION_ON false
 #define LORAWAN_APP_DATA_BUFF_SIZE 64  /**< Size of the data to be transmitted. */
+#define LORA_TX_QUEUE_SIZE 10
+
 
 /* --------------- Command LRW Dictionary --------------- */
 typedef enum: uint8_t
@@ -199,8 +201,8 @@ typedef struct
 {
     struct
     {
-        uint8_t sequenceNumber : 5;
-        uint8_t protocolVersion : 3;
+        uint8_t sequenceNumber : 6;
+        uint8_t protocolVersion : 2;
     } header;
 
     uint8_t loraId[3];

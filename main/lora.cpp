@@ -265,7 +265,7 @@ void loraTask(void* param)
 	Isca_t *config = (Isca_t*) param;
 	LoRaQueueElement_t loraQueueElement2Send = {.type = QUEUE_NONE};
     
-	xQueueLoRa = xQueueCreate( 10, sizeof( LoRaQueueElement_t ) );
+	xQueueLoRa = xQueueCreate( LORA_TX_QUEUE_SIZE, sizeof( LoRaQueueElement_t ) );
 	xQueueSendP2P = xQueueCreate(5, sizeof(LoRaElementP2P_t));
 	xQueueSendLRW = xQueueCreate(5, sizeof(LoRaElementLRWTx_t));
 	xTaskToNotify = xTaskGetCurrentTaskHandle();
@@ -351,7 +351,7 @@ void loraTask(void* param)
 				{
 					xTaskNotifyWait( pdFALSE, pdFALSE, &ulNotifiedValue, xMaxBlockTime );
 				}
-				ESP_LOGI(TAG, "flags: %03lX", ulNotifiedValue);
+				ESP_LOGI(TAG, "flags: %03lX | free xQueueTxLoRa = %d/%d", ulNotifiedValue, uxQueueSpacesAvailable(xQueueLoRa),LORA_TX_QUEUE_SIZE);
 
 				if( ( ulNotifiedValue & LORA_BIT_P2P_TX_DONE ) != 0 )
 				{
@@ -462,7 +462,6 @@ void loraTask(void* param)
 					
 					Radio.Send(p2pElement.payload.buffer, p2pElement.payload.size);
 					
-					// ESP_LOG_BUFFER_HEX("P2P SENT", p2pElement.payload.buffer, p2pElement.payload.size);
 					char payload[256];
 					for(int i = 0; i < p2pElement.payload.size; i++)
 					{
