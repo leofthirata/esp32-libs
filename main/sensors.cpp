@@ -301,9 +301,9 @@ void sensorsTask(void* parameter)
             _sensorStatus.batVoltage = 2*voltage[0];
             memcpy(&_sensorStatus.acc, _acc, sizeof(_sensorStatus.acc));
 
-            ESP_LOGW(TAG, "[ACC](mg) x:%ld | y:%ld | z:%ld | [TEMP](oC) %02.2f | %s %s %s | batStatus:%s", 
-                    _acc[0], _acc[1], _acc[2], _temperature,
-                    printLog[0], printLog[1], printLog[2], printBatStatus((SensorsBatStatus_t)_sensorStatus.batStatus));
+            // ESP_LOGW(TAG, "[ACC](mg) x:%ld | y:%ld | z:%ld | [TEMP](oC) %02.2f | %s %s %s | batStatus:%s", 
+            //         _acc[0], _acc[1], _acc[2], _temperature,
+            //         printLog[0], printLog[1], printLog[2], printBatStatus((SensorsBatStatus_t)_sensorStatus.batStatus));
             
             esp_event_post(APP_EVENT, APP_EVENT_SENSORS_STATUS, &_sensorStatus, sizeof(SensorsStatus_t), 0);
         }

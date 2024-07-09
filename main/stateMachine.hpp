@@ -52,6 +52,7 @@ typedef enum {
     SM_RCV_P2P,
     SM_RCV_LRW,
     SM_SENSORS_STATUS,
+    SM_SEND_GSM,
 } Isca_SM_t;
 
 
@@ -62,6 +63,7 @@ typedef enum {
     APP_EVENT_REQ_LRW_SEND_STATUS,
     APP_EVENT_QUEUE_P2P_SEND,
     APP_EVENT_QUEUE_LRW_SEND,
+    APP_EVENT_REQ_GSM_SEND,
     APP_EVENT_LRW_RX,
     APP_EVENT_P2P_RX,
     APP_EVENT_P2P_TX_DONE,

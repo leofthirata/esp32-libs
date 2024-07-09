@@ -91,9 +91,12 @@ typedef struct
     uint32_t reset;
     uint64_t lastP2PTick;
     uint64_t lastLRWTick;
+    uint64_t lastGSMTick;
     uint64_t P2PAlarm;
     uint64_t LRWAlarm;
+    uint64_t GSMAlarm;
     uint8_t P2PCount;
+    uint16_t GSMCount;
     int32_t acc[3];
     float temperatureFloat;
     

@@ -2,6 +2,8 @@
 #include "esp_timer.h"
 #include "lora.hpp"
 #include "sensors.hpp"
+#include "modem.hpp"
+#include "sys/time.h"
 
 static Isca_t *m_config;
 static bool resetRequested = false;
@@ -12,8 +14,8 @@ static QueueHandle_t xQueueP2PRx, xQueueLRWRx;
 
 static void p2pTimerCallback(void* arg);
 static void lrwTimerCallback(void* arg);
-esp_timer_handle_t p2pTimer;
-esp_timer_handle_t lrwTimer;
+static void gsmTimerCallback(void* arg);
+esp_timer_handle_t p2pTimer, lrwTimer, gsmTimer;
 
 static LoRaElementLRWTx_t lrwTx;
 static LoRaElementLRWRx_t lrwRx;
@@ -21,7 +23,7 @@ static LoRaElementP2PRx_t p2pRx;
 static LoRaElementP2P_t p2pTx, p2pTxDone;
 static LoRaElementLRWTxDone_t lrwTxDone;
 static SensorsStatus_t _sensorStatus; 
-
+static GSMElementTx_t gsmTx;
 // APP event base declaration
 ESP_EVENT_DECLARE_BASE(APP_EVENT);
 
@@ -33,8 +35,9 @@ ESP_EVENT_DECLARE_BASE(APP_EVENT);
 #define BIT_LRW_TX_DONE 0x20
 #define BIT_SENSORS_STATUS 0x40
 #define BIT_LRW_REQ_TX_STATUS 0x80
+#define BIT_GSM_REQ_TX  0x100
 
-void stopLoRaTimers();
+void stopTimers();
 void lorawanRX(LoRaElementLRWRx_t* _lrwRx);
 
 uint8_t dallas_crc8(const uint8_t *pdata, const uint32_t size)
@@ -122,7 +125,7 @@ void enterStockMode()
 	{
 		m_config->flags.asBit.stockMode = true;
 		printf("[SM] Warning! Enter Stock Mode\r\n");
-		stopLoRaTimers();
+		stopTimers();
 		// /bleDisableConnectableDevice();
 		printf("[DEQUEUE] Start Queue flush to enter stock mode\r\n");
 		// while(numberQueueElements())
@@ -153,7 +156,7 @@ void sendStatus()
 	//queueSend(QUEUE_SEND_STATUS);
 }
 
-void stopLoRaTimers()
+void stopTimers()
 {
     if(esp_timer_is_active(p2pTimer))
 	{
@@ -174,8 +177,50 @@ void stopLoRaTimers()
 		esp_timer_stop(lrwTimer);
         m_config->LRWAlarm = 0;
     }
+
+    if(esp_timer_is_active(gsmTimer))
+	{
+		uint64_t expiryTime = 0;
+		esp_timer_get_expiry_time(gsmTimer, &expiryTime);
+
+		printf("[TIMER] Stopping Active GSM Timer %llus |\r\n", expiryTime/1000000);
+		esp_timer_stop(gsmTimer);
+        m_config->GSMAlarm = 0;
+    }
 }
 
+void updateGSMTimer(uint32_t newTime)
+{
+	int64_t now;
+    if(esp_timer_is_active(gsmTimer))
+	{
+		uint64_t expiryTime = 0;
+		esp_timer_get_expiry_time(gsmTimer, &expiryTime);
+
+		printf("[TIMER] Stopping Active GSM Timer %llus |\r\n", expiryTime/1000000);
+		esp_timer_stop(gsmTimer);
+		printf("[TIMER] Restarting GSM Timer new timeout %lus |\r\n", newTime);
+        now = esp_timer_get_time();
+		uint8_t ret_val = esp_timer_start_periodic(gsmTimer, (uint64_t)newTime*1000000);
+		if(ret_val != ESP_OK)
+		{
+			printf("[TIMER] Error restarting GSM Timer new timeout\r\n");
+			while(1);
+		}
+	}
+    else
+    {
+        printf("[TIMER] Starting GSM Timer new timeout %lus |\r\n", newTime);
+        now = esp_timer_get_time();
+        uint8_t ret_val = esp_timer_start_periodic(gsmTimer, (uint64_t)newTime*1000000);
+        if(ret_val != ESP_OK)
+		{
+			printf("[TIMER] Error starting GSM Timer new timeout\r\n");
+			while(1);
+		}
+    }
+    m_config->GSMAlarm = now + (newTime*1000000);
+}
 
 void updateP2PTimer(uint32_t newTime)
 {
@@ -320,7 +365,20 @@ void changeTime(TimeType_t type, uint32_t time)
     }
 
 }
-
+static void gsmTimerCallback(void* arg)
+{
+    int64_t now = esp_timer_get_time();
+    ESP_LOGW(TAG, "----------- GSM TIMEOUT ------------\r\n");
+    m_config->lastGSMTick = now;
+    uint64_t gsmExpiryTime;
+    esp_err_t ret = esp_timer_get_period(gsmTimer, &gsmExpiryTime);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Get GSM TIMER failed %d", ret);
+    }
+    m_config->GSMAlarm = now + gsmExpiryTime;
+    xTaskNotify(xTaskToNotify, BIT_GSM_REQ_TX, eSetBits);
+}
 
 static void p2pTimerCallback(void* arg)
 {
@@ -450,13 +508,21 @@ void stateTask (void* pvParameters)
             .name = "lrwTimer"
     };
 
+    const esp_timer_create_args_t gsmTimerArgs = {
+            .callback = &gsmTimerCallback,
+            .name = "gsmTimer"
+    };
+
     ESP_ERROR_CHECK(esp_timer_create(&p2pTimerArgs, &p2pTimer));
     ESP_ERROR_CHECK(esp_timer_create(&lrwTimerArgs, &lrwTimer));
+    ESP_ERROR_CHECK(esp_timer_create(&gsmTimerArgs, &gsmTimer));
         
     m_config->p2pStpEmer = 0x1E;
-    m_config->p2pStpNorm = 0x05;
+    m_config->p2pStpNorm = 0x3C;
     m_config->lrwStpEmer = 0x1E;
     m_config->lrwStpNorm = 0x3C;
+    m_config->gsmStpEmer = 0x3C;
+    m_config->gsmStpNorm = 120;
     
     uint32_t ulNotifiedValue = 0;
     const TickType_t xMaxBlockTime = pdMS_TO_TICKS( TIMEOUT_STATE_MACHINE );
@@ -477,8 +543,8 @@ void stateTask (void* pvParameters)
 
                 int64_t now = esp_timer_get_time();
 
-                ESP_LOGI(TAG, "flags: %02lX | Timeout P2P: %03llds | Timeout LRW: %03llds", 
-                ulNotifiedValue,((m_config->P2PAlarm - now))/1000000, ((m_config->LRWAlarm - now))/1000000);
+                ESP_LOGI(TAG, "flags: %02lX | Timeout P2P: %03llds | Timeout LRW: %03llds | Timeout GSM: %03llds", 
+                ulNotifiedValue,((m_config->P2PAlarm - now))/1000000, ((m_config->LRWAlarm - now))/1000000,((m_config->GSMAlarm - now))/1000000);
 
                 if(uxQueueSpacesAvailable(xQueueP2PRx) != QUEUE_P2P_RX_SIZE)
                 {
@@ -535,6 +601,12 @@ void stateTask (void* pvParameters)
                     state = SM_SENSORS_STATUS;
                     ulTaskNotifyValueClear( xTaskToNotify, BIT_SENSORS_STATUS );
                     ulNotifiedValue &= ~BIT_SENSORS_STATUS;
+                } 
+                else if(( ulNotifiedValue & BIT_GSM_REQ_TX) != 0)
+                {
+                    state = SM_SEND_GSM;
+                    ulTaskNotifyValueClear( xTaskToNotify, BIT_GSM_REQ_TX );
+                    ulNotifiedValue &= ~BIT_GSM_REQ_TX;
                 }
 
             }
@@ -695,7 +767,6 @@ void stateTask (void* pvParameters)
 
             case SM_SEND_LRW_STATUS:
             {
-                static uint32_t count = 0;
 
                 lrwTx.params.port = m_config->lrwPosPort;
                 lrwTx.params.confirmed = m_config->lrwConfirmed;
@@ -775,12 +846,12 @@ void stateTask (void* pvParameters)
                 {
                     printf("[LORA] PARSE LRW Status | Protocol Version: 0x%02X | ", lrwTxDone.payload.buffer[0]);
                     printf("HW Ver: 0x%02X | FW Ver: 0x%02X |\r\n", lrwTxDone.payload.buffer[1], lrwTxDone.payload.buffer[2]);
-                    printf("| LoRaID: 0x%02lX%02lX%02lX = %ld | ", lrwTxDone.payload.buffer[3], lrwTxDone.payload.buffer[4], \
+                    printf("| LoRaID: 0x%02X%02X%02X = %d | ", lrwTxDone.payload.buffer[3], lrwTxDone.payload.buffer[4], \
                                                                 lrwTxDone.payload.buffer[5], 
-                                                                (lrwTxDone.payload.buffer[3]<<16 + lrwTxDone.payload.buffer[4]<<8 + lrwTxDone.payload.buffer[5]));
+                                                                ( (lrwTxDone.payload.buffer[3]<<16) + (lrwTxDone.payload.buffer[4]<<8) + lrwTxDone.payload.buffer[5]));
                     printf("Temp: 0x%02X = %d | ", lrwTxDone.payload.buffer[6], lrwTxDone.payload.buffer[6]);
                     printf("Battery: 0x%02X%02X = %d mV | ", lrwTxDone.payload.buffer[7], lrwTxDone.payload.buffer[8],
-                                                    lrwTxDone.payload.buffer[7]<<8 + lrwTxDone.payload.buffer[8]);
+                                                    (lrwTxDone.payload.buffer[7]<<8) + lrwTxDone.payload.buffer[8]);
                     printf("Flags: 0x%02X%02X |\r\n", lrwTxDone.payload.buffer[9], lrwTxDone.payload.buffer[10]);
                     printf("| Emergency: %s | LowBattery: %s | Jammer: %s | Movement: %s |\r\n",
                             m_config->flags.asBit.emergency?"ON":"OFF", m_config->flags.asBit.lowBattery?"ON":"OFF",
@@ -820,15 +891,17 @@ void stateTask (void* pvParameters)
             case SM_UPDATE_TIMERS:
                 if(m_config->flags.asBit.emergency)
                 {
-                    stopLoRaTimers();
+                    stopTimers();
                     updateP2PTimer(m_config->p2pStpEmer);
                     updateLRWTimer(m_config->lrwStpEmer);
+                    updateGSMTimer(m_config->gsmStpEmer);
                 }
                 else
                 {
-                    stopLoRaTimers();
+                    stopTimers();
                     updateP2PTimer(m_config->p2pStpNorm);
                     updateLRWTimer(m_config->lrwStpNorm);
+                    updateGSMTimer(m_config->gsmStpNorm);
 
                 }
                 state =SM_WAIT_FOR_EVENT;
@@ -868,11 +941,63 @@ void stateTask (void* pvParameters)
                     m_config->flags.asBit.powerSupply = 1;
                 }
 
-                ESP_LOGW(TAG, "[ACC](mg) x:%ld | y:%ld | z:%ld | [TEMP]: %02.2foC | [batVoltage]: %04dmV | [batStatus]: %s", 
+                ESP_LOGI(TAG, "[ACC](mg) x:%ld | y:%ld | z:%ld | [TEMP]: %02.2foC | [batVoltage]: %04dmV | [batStatus]: %s", 
                     m_config->acc[0], m_config->acc[1],m_config->acc[2],  m_config->temperatureFloat, m_config->batteryMiliVolts,
                     printBatStatus((SensorsBatStatus_t)m_config->flags.asBit.statusBattery));
                 
                 state = SM_WAIT_FOR_EVENT;
+            break;
+
+            case SM_SEND_GSM:
+            {
+                static uint16_t counter = 0;
+                gsmTx.header = 0xD7;
+                uint64_t serial = 0;
+                serial = (uint64_t) 109*100000000 + m_config->loraId;
+                gsmTx.serialNumber[0] = (serial >> 32) & 0xFF;
+                gsmTx.serialNumber[1] = (serial >> 24) & 0xFF;
+                gsmTx.serialNumber[2] = (serial >> 16) & 0xFF;
+                gsmTx.serialNumber[3] = (serial >> 8) & 0xFF;
+                gsmTx.serialNumber[4] = (serial) & 0xFF;
+                gsmTx.fw[0] = 0xDD;
+                gsmTx.fw[1] = 0xEE;
+                gsmTx.hw = m_config->hwVer;
+                gsmTx.protocol = 0xCC;
+                gsmTx.counter[0] = (counter >> 8) & 0xFF;
+                gsmTx.counter[1] = counter & 0xFF;
+                m_config->GSMCount = counter;
+                if(counter == 0xFFFF)
+                    counter = 0;
+                else
+                    counter++;
+                struct timeval current;
+                gettimeofday(&current, NULL);
+                gsmTx.timestamp[0] = (current.tv_sec >> 24) & 0xFF;
+                gsmTx.timestamp[1] = (current.tv_sec >> 16) & 0xFF;
+                gsmTx.timestamp[2] = (current.tv_sec >> 8) & 0xFF;
+                gsmTx.timestamp[3] = (current.tv_sec) & 0xFF;
+                
+                state = SM_WAIT_FOR_EVENT;
+                gsmTx.type = 0x00;
+                gsmTx.loraID[0] = (m_config->loraId >> 16) & 0xff;
+                gsmTx.loraID[1] = (m_config->loraId >> 8) & 0xff;
+                gsmTx.loraID[2] = (m_config->loraId) & 0xff;
+                gsmTx.temp = m_config->temperatureCelsius;
+                gsmTx.batteryVoltage[0] = (m_config->batteryMiliVolts >> 8) & 0xff;
+                gsmTx.batteryVoltage[1] = (m_config->batteryMiliVolts) & 0xff;
+                gsmTx.flags.asBit.bt = m_config->flags.asBit.bleStatus;
+                gsmTx.flags.asBit.emergency = m_config->flags.asBit.emergency;
+                gsmTx.flags.asBit.input = m_config->flags.asBit.input;
+                gsmTx.flags.asBit.jammerGsm = m_config->flags.asBit.jammer;
+                gsmTx.flags.asBit.jammerLoRa = m_config->flags.asBit.jammer;
+                gsmTx.flags.asBit.lowBattery = m_config->flags.asBit.lowBattery;
+                gsmTx.flags.asBit.movement = m_config->flags.asBit.movement;
+                gsmTx.flags.asBit.output = m_config->flags.asBit.output;
+                gsmTx.flags.asBit.statusBattery = m_config->flags.asBit.statusBattery;
+                gsmTx.flags.asBit.stockMode = m_config->flags.asBit.stockMode;
+                gsmTx.lastRst = 0x00;
+                esp_event_post(APP_EVENT, APP_EVENT_REQ_GSM_SEND, &gsmTx, sizeof(GSMElementTx_t), 0);
+            }
             break;
         }
     }

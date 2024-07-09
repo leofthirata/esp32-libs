@@ -6,39 +6,26 @@
 #include "driver/gpio.h"
 #include "esp_modem_api.h"
 #include "string.h"
-
+#include "sys/time.h"
+#include "stateMachine.hpp"
+#include "modem.hpp"
+ #define CORE_DEBUG_LEVEL   5
 static const char *TAG = "MDM_TSK";
 
 #define GPIO_PIN_SEL(pin) (1ULL << pin)
-#define ESP_MODEM_C_API_STR_MAX=1024
-#define BOARD_DEV
-#ifdef BOARD_DEV
 #define TXD_PIN ((gpio_num_t)GPIO_NUM_14)
 #define RXD_PIN ((gpio_num_t)GPIO_NUM_34)
 #define GPIO_OUTPUT_PWRKEY ((gpio_num_t)GPIO_NUM_16)
 #define GPIO_OUTPUT_POWER_ON ((gpio_num_t)GPIO_NUM_13)
 #define GPIO_OUTPUT_RST ((gpio_num_t)GPIO_NUM_NC)
-#else
-#define TXD_PIN ((gpio_num_t)27)
-#define RXD_PIN ((gpio_num_t)26)
-#define GPIO_OUTPUT_PWRKEY ((gpio_num_t)16)
-#define GPIO_OUTPUT_POWER_ON ((gpio_num_t)23)
-#define GPIO_OUTPUT_RST ((gpio_num_t)5)
-#endif
-
-// #define SETTINGS_DEFAULT_GSM_APN "iot4u.br"
-// #define SETTINGS_DEFAULT_GSM_USER "arquia"
-// #define SETTINGS_DEFAULT_GSM_PASSWORD "arquia"
-
-// #define SETTINGS_DEFAULT_GSM_APN "virtueyes.com.br"
-// #define SETTINGS_DEFAULT_GSM_USER "virtu"
-// #define SETTINGS_DEFAULT_GSM_PASSWORD "virtu"
 
 #define SETTINGS_DEFAULT_GSM_APN "simplepm.algar.br"
-#define SETTINGS_DEFAULT_SERVER "mogno.ceabs.net"
-#define SETTINGS_DEFAULT_SERVER_PORT 9015
+#define SETTINGS_DEFAULT_SERVER "0.tcp.sa.ngrok.io"
+#define SETTINGS_DEFAULT_SERVER_PORT 12561
 
 #define SETTINGS_DEFAULT_SENDING_INTERVAL 60000
+
+static GSMElementTx_t gsmTx;
 
 typedef enum
 {
@@ -56,7 +43,7 @@ typedef enum
     STATE_RECEIVE_PACKET,
     STATE_WAIT_EVENT,
     STATE_SLEEP,
-
+    STATE_POWERON,
 } en_task_state;
 
 typedef enum
@@ -102,6 +89,47 @@ typedef struct
     int c2;     // C2 value
 } mdm_lbs_cell_t;
 
+
+
+
+struct tm tm;
+
+const char* printError(esp_err_t ret)
+{
+    switch(ret)
+    {
+        case ESP_ERR_NO_MEM:
+        return "ESP_ERR_NO_MEM";
+        case ESP_ERR_INVALID_ARG:
+        return "ESP_ERR_INVALID_ARG";
+        case ESP_ERR_INVALID_STATE:
+        return "ESP_ERR_INVALID_STATE";
+        case ESP_ERR_INVALID_SIZE:
+        return "ESP_ERR_INVALID_SIZE";
+        case ESP_ERR_NOT_FOUND:
+        return "ESP_ERR_NOT_FOUND";
+        case ESP_ERR_NOT_SUPPORTED:
+        return "ESP_ERR_NOT_SUPPORTED";
+        case ESP_ERR_TIMEOUT:
+        return "ESP_ERR_TIMEOUT";
+        case ESP_ERR_INVALID_RESPONSE:
+        return "ESP_ERR_INVALID_RESPONSE";
+        case ESP_ERR_INVALID_CRC:
+        return "ESP_ERR_INVALID_CRC";
+        case ESP_ERR_INVALID_VERSION:
+        return "ESP_ERR_INVALID_VERSION";
+        case ESP_ERR_INVALID_MAC:
+        return "ESP_ERR_INVALID_MAC";
+        case ESP_ERR_NOT_FINISHED:
+        return "ESP_ERR_NOT_FINISHED";
+        case ESP_ERR_NOT_ALLOWED:
+        return "ESP_ERR_NOT_ALLOWED";
+        default:
+        return "UNKNOW_ESP_ERR";
+    }
+
+}
+
 #define CHECK_ERR(cmd, success_action)                                                     \
     do                                                                                     \
     {                                                                                      \
@@ -112,11 +140,38 @@ typedef struct
         }                                                                                  \
         else                                                                               \
         {                                                                                  \
-            ESP_LOGE(TAG, "Failed with %s", ret == ESP_ERR_TIMEOUT ? "TIMEOUT" : "ERROR"); \
+            ESP_LOGE(TAG, "Failed with %s | %d", printError(ret), ret);                    \
         }                                                                                  \
     } while (0)
 
 QueueHandle_t _internal_queue;
+
+void power_on_modem(esp_modem_dce_t *dce)
+{
+    // gpio_set_level(GPIO_OUTPUT_POWER_ON, false);
+    // gpio_set_level(GPIO_OUTPUT_RST, true);
+
+    /* Power on the modem */
+    ESP_LOGI(TAG, "Power on the modem");
+    //gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    gpio_set_level(GPIO_OUTPUT_PWRKEY, 0);
+    vTaskDelay(pdMS_TO_TICKS(2700));
+    // CHECK_ERR(esp_modem_sync(dce), ESP_LOGI(TAG, "OK"));
+}
+
+void power_off_modem()
+{
+    ESP_LOGI(TAG, "Power off the modem");
+    // gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
+    // vTaskDelay(pdMS_TO_TICKS(500));
+    gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    gpio_set_level(GPIO_OUTPUT_PWRKEY, 0);
+    //vTaskDelay(pdMS_TO_TICKS(2700));
+}
 
 void config_pwrkey_gpio(void)
 {
@@ -131,25 +186,12 @@ void config_pwrkey_gpio(void)
     gpio_config(&io_conf); // configure GPIO with the given settings
 
     gpio_set_level(GPIO_OUTPUT_POWER_ON, true);
+    gpio_set_level(GPIO_OUTPUT_PWRKEY, false);
 
-    vTaskDelay(10000);
+    power_off_modem();
+    vTaskDelay(2000);
 }
 
-void power_on_modem(esp_modem_dce_t *dce)
-{
-    gpio_set_level(GPIO_OUTPUT_POWER_ON, false);
-    // gpio_set_level(GPIO_OUTPUT_RST, true);
-
-    /* Power on the modem */
-    ESP_LOGI(TAG, "Power on the modem");
-    gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
-    vTaskDelay(pdMS_TO_TICKS(500));
-    gpio_set_level(GPIO_OUTPUT_PWRKEY, 0);
-    vTaskDelay(pdMS_TO_TICKS(1700));
-    gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
-    vTaskDelay(pdMS_TO_TICKS(3000));
-    CHECK_ERR(esp_modem_sync(dce), ESP_LOGI(TAG, "OK"));
-}
 
 char *generate_position_json(mdm_lbs_cell_t *cells, task_data_t *task_data)
 {
@@ -213,16 +255,103 @@ char *generate_position_json(mdm_lbs_cell_t *cells, task_data_t *task_data)
     cJSON_Delete(root);
     return string;
 }
+uint8_t crc8_itu(uint8_t *data, uint16_t length)
+{
+    uint8_t i;
+    uint8_t crc = 0;        // Initial value
+    while(length--)
+    {
+        crc ^= *data++;        // crc ^= *data; data++;
+        for ( i = 0; i < 8; i++ )
+        {
+            if ( crc & 0x80 )
+                crc = (crc << 1) ^ 0x07;
+            else
+                crc <<= 1;
+        }
+    }
+    return crc ^ 0x55;
+}
+
+char *generate_position_hex(mdm_lbs_cell_t *cells, GSMElementTx_t *_data)
+{
+    char *string = NULL;
+    uint8_t *hexArray = NULL;
+    uint8_t numberErbs = 0;
+
+    for (int i = 0; i < 7; i++)
+    {
+        if (cells[i].bcch != 0)
+        {
+            numberErbs++;
+        }
+    }
+    uint8_t positionHexSize = sizeof(GSMElementTx_t) + numberErbs*sizeof(GSMERBPacket_t);
+    hexArray = calloc(positionHexSize, sizeof(uint8_t));
+
+    _data->n_erbs =  numberErbs;
+    memcpy(hexArray, _data, sizeof(GSMElementTx_t));
+
+    for (int i = 0; i < 7; i++)
+    {
+        if (cells[i].bcch != 0)
+        {
+            uint16_t _index = sizeof(GSMElementTx_t) + i*sizeof(GSMERBPacket_t);
+            GSMERBPacket_t *erbPacket_p = (GSMERBPacket_t*)(hexArray + _index);
+            erbPacket_p->id[0] = 0x00;//(cells[i].cellid>>(4*8)) * 0xff;
+            erbPacket_p->id[1] = (cells[i].cellid>>(3*8)) * 0xff;
+            erbPacket_p->id[2] = (cells[i].cellid>>(2*8)) * 0xff;
+            erbPacket_p->id[3] = (cells[i].cellid>>(1*8)) * 0xff;
+            erbPacket_p->id[4] = (cells[i].cellid) * 0xff;
+            erbPacket_p->mcc[0] = (cells[i].mcc >> 8 ) &0xFF;
+            erbPacket_p->mcc[1] = (cells[i].mcc ) &0xFF;
+            erbPacket_p->mnc[0] = (cells[i].mnc >> 8 ) &0xFF;
+            erbPacket_p->mnc[1] = (cells[i].mnc ) &0xFF;
+            erbPacket_p->bsic = cells[i].bsic;
+            erbPacket_p->ta = cells[i].ta;
+            erbPacket_p->lac[0] = 0x00;//(cells[i].lac>>(4*8)) * 0xff;
+            erbPacket_p->lac[1] = (cells[i].lac>>(3*8)) * 0xff;
+            erbPacket_p->lac[2] = (cells[i].lac>>(2*8)) * 0xff;
+            erbPacket_p->lac[3] = (cells[i].lac>>(1*8)) * 0xff;
+            erbPacket_p->lac[4] = (cells[i].lac) * 0xff;
+        }
+    }
+    uint8_t crc_calc=crc8_itu( hexArray, positionHexSize);
+    GSMElementTx_t *element_p = (GSMElementTx_t*)hexArray;
+    element_p->crc = crc_calc;
+
+
+    string = calloc(positionHexSize*2+1, sizeof(uint8_t));
+    for(uint8_t i = 0; i < positionHexSize; i++)
+    {
+        sprintf(string+i*2, "%02X", *(hexArray + i));
+    }
+    *(string + positionHexSize*2) = 0x00;
+    free(hexArray);
+    return string;
+}
+
+static void app_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data)
+{
+    if (event_base == APP_EVENT && event_id == APP_EVENT_REQ_GSM_SEND)
+    {
+        GSMElementTx_t *element_p = (GSMElementTx_t*) event_data;
+        memcpy(&gsmTx, element_p, sizeof(GSMElementTx_t));
+        xQueueSend(_internal_queue, &gsmTx,0);
+    }
+}
 
 void modem_task_function(void *pvParameters)
 {
     esp_err_t err;
-    en_task_state state = STATE_SYNC;
+    en_task_state state;
     task_data_t task_data = {};
 
     char command[128] = {};
     char response[512] = {};
     mdm_lbs_cell_t cells[7] = {};
+    GSMElementTx_t gsmElement;
     ESP_LOGI(TAG, "modem task starting");
 
     /* Configure and create the UART DTE */
@@ -232,14 +361,6 @@ void modem_task_function(void *pvParameters)
     dte_config.uart_config.rx_io_num = RXD_PIN;
     dte_config.uart_config.rts_io_num = -1;
     dte_config.uart_config.cts_io_num = -1;
-    // dte_config.uart_config.rx_buffer_size = CONFIG_EXAMPLE_MODEM_UART_RX_BUFFER_SIZE;
-    // dte_config.uart_config.tx_buffer_size = CONFIG_EXAMPLE_MODEM_UART_TX_BUFFER_SIZE;
-    // dte_config.uart_config.event_queue_size = CONFIG_EXAMPLE_MODEM_UART_EVENT_QUEUE_SIZE;
-    // dte_config.task_stack_size = CONFIG_EXAMPLE_MODEM_UART_EVENT_TASK_STACK_SIZE * 2;
-    // dte_config.task_priority = CONFIG_EXAMPLE_MODEM_UART_EVENT_TASK_PRIORITY;
-    // dte_config.dte_buffer_size = CONFIG_EXAMPLE_MODEM_UART_RX_BUFFER_SIZE / 2;
-
-    // esp_modem_dce_config_t dce_config = ESP_MODEM_DCE_DEFAULT_CONFIG("simplepm.algar.br");
     esp_modem_dce_config_t dce_config = ESP_MODEM_DCE_DEFAULT_CONFIG(SETTINGS_DEFAULT_GSM_APN);
     esp_netif_config_t netif_ppp_config = ESP_NETIF_DEFAULT_PPP();
     esp_netif_t *esp_netif = esp_netif_new(&netif_ppp_config);
@@ -249,29 +370,48 @@ void modem_task_function(void *pvParameters)
     esp_modem_dce_t *dce = esp_modem_new_dev(ESP_MODEM_DCE_SIM800, &dte_config, &dce_config, esp_netif);
 
     config_pwrkey_gpio();
-    power_on_modem(dce);
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    state = STATE_INIT;
 
     for (;;)
     {
-        ESP_LOGW("MODEM", "state = %d", state);
         switch (state)
-        {  
+        {
 
         case STATE_INIT:
-
             //@ TODO - Usar funções para checar alocação do recurso
-            _internal_queue = xQueueCreate(10, sizeof(event_t));
-
+            _internal_queue = xQueueCreate(10, sizeof(GSMElementTx_t));
+            esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, NULL, NULL);
+            state = STATE_SLEEP;
             break;
 
         case STATE_DEINIT:
-
             vQueueDelete(_internal_queue);
-
             // TODO - Desalocar recursos que foram criados nesse estado.
-
             break;
+
+        case STATE_WAIT_EVENT:
+                //vTaskDelay(pdMS_TO_TICKS(60000));
+                if(xQueueReceive(_internal_queue, &gsmElement, portMAX_DELAY))
+                {
+                    state = STATE_POWERON;
+                }
+            break;
+
+        case STATE_POWERON:
+            power_on_modem(dce);
+            esp_err_t ret = ESP_OK;
+            ret = esp_modem_sync(dce);
+            if(ret == ESP_OK)
+            {
+                state = STATE_SYNC;
+            }
+            else
+            {
+                ESP_LOGE(TAG, "Error PowerOn: %d", ret);
+                state = STATE_WAIT_EVENT;
+            }
+            break;
+
 
         case STATE_SYNC:
 
@@ -292,6 +432,7 @@ void modem_task_function(void *pvParameters)
                 ESP_LOGI(TAG, "Modem imei: %s", task_data.imei);
 
             vTaskDelay(1000);
+            esp_modem_at(dce, "AT+COPS=0", response, 5000);
             // esp_modem_at(dce, "AT+COPS=2", response, 5000);
             // esp_modem_at(dce, "AT+SIMEI=863070046562780", response, 1000);
             // esp_modem_at(dce, "AT+COPS=0", response, 5000);
@@ -428,7 +569,41 @@ void modem_task_function(void *pvParameters)
             }
             esp_modem_at(dce, "AT+CCLK?", response, 1000);
 
+            //{+CCLK: "24/07/08,09:31:48-12"}
             sscanf(response, "+CCLK: \"%s\"", task_data.date_time);
+            int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, tz = 0;
+            char sign = 0x00;
+
+            sscanf(task_data.date_time, "%d/%d/%d,%d:%d:%d%c%d",
+                        &year, &month, &day, &hour, &minute, &second, &sign, &tz);
+            // tm.tm_isdst = -1;
+            tm.tm_year = year + 2000 - 1900;
+            tm.tm_mon = month - 1;
+            tm.tm_mday = day;
+            tm.tm_hour = hour;
+            tm.tm_min = minute;
+            tm.tm_sec = second;
+            time_t t = mktime(&tm);
+
+            //int32_t unixtempo = (int32_t) t;
+            struct timeval tv;
+            tv.tv_sec = t;
+            printf("Setting time: %s | %lld\r\n", asctime(&tm), t);
+
+            settimeofday(&tv, NULL);
+            struct timeval current;
+            gettimeofday(&current, NULL);
+            printf(" Second : %llu \n Microsecond : %06lu\r\n",
+                current.tv_sec, current.tv_usec);
+            // struct timeval now = { .tv_sec = t };
+            // settimeofday(&now, NULL);
+
+
+
+
+            char buf[255];
+            strftime(buf, sizeof(buf), "%d %b %Y %H:%M:%S", &tm);
+            ESP_LOGW(TAG, "%s", buf);
             // CHECK_ERR(, ESP_LOGI(TAG, "%s", response));
 
             // vTaskDelay(pdMS_TO_TICKS());
@@ -471,9 +646,6 @@ void modem_task_function(void *pvParameters)
             state = STATE_SCAN_NETWORKS;
             break;
 
-        case STATE_WAIT_EVENT:
-
-            break;
 
         case STATE_SEND_PACKET:
 
@@ -492,6 +664,7 @@ void modem_task_function(void *pvParameters)
             sprintf(command, "AT+CIPSTART=\"TCP\",\"%s\",\"%d\"\r\n", SETTINGS_DEFAULT_SERVER, SETTINGS_DEFAULT_SERVER_PORT);
             esp_modem_at_raw(dce, command, response, "CONNECT OK", "ERROR", 5000);
 
+#ifdef _SEND_JSON
             char *json = generate_position_json(cells, &task_data);
             ESP_LOGI(TAG, "Sending JSON: %s", json);
 
@@ -501,7 +674,7 @@ void modem_task_function(void *pvParameters)
             // send request was accepted
             if (err == ESP_OK)
             {
-                err = esp_modem_at_raw(dce, json, response, "SEND OK", "SEND FAIL", 645 * 1000);
+                err = esp_modem_at_raw(dce, json, response, "SEND OK", "SEND FAIL", 90 * 1000);
 
                 if (err)
                     ESP_LOGW(TAG, "Fail to send packet");
@@ -509,14 +682,44 @@ void modem_task_function(void *pvParameters)
                     ESP_LOGI(TAG, "Success to send packet");
             }
             free(json);
+#else
+            uint64_t _imei = strtoll(task_data.imei, NULL, 10);
+            gsmElement.imei[0] = (_imei>>(6*8)) & 0xFF;
+            gsmElement.imei[1] = (_imei>>(5*8)) & 0xFF;
+            gsmElement.imei[2] = (_imei>>(4*8)) & 0xFF;
+            gsmElement.imei[3] = (_imei>>(3*8)) & 0xFF;
+            gsmElement.imei[4] = (_imei>>(2*8)) & 0xFF;
+            gsmElement.imei[5] = (_imei>>(1*8)) & 0xFF;
+            gsmElement.imei[6] = (_imei) & 0xFF;
+            char *hex = generate_position_hex(cells, &gsmElement);
+            ESP_LOGI(TAG, "Sending HEX: %s", hex);
 
+            sprintf(command, "AT+CIPSEND=%d\r", strlen(hex));
+            err = esp_modem_at_raw(dce, command, response, ">", "ERROR", 500);
+
+            // send request was accepted
+            if (err == ESP_OK)
+            {
+                err = esp_modem_at_raw(dce, hex, response, "SEND OK", "SEND FAIL", 90 * 1000);
+
+                if (err)
+                    ESP_LOGW(TAG, "Fail to send packet");
+                else
+                    ESP_LOGI(TAG, "Success to send packet");
+            }
+            free(hex);
+
+#endif
             // fecha socket após envio.
             sprintf(command, "AT+CIPCLOSE");
             esp_modem_at(dce, command, response, 5000);
-            vTaskDelay(pdMS_TO_TICKS(SETTINGS_DEFAULT_SENDING_INTERVAL));
-            state = STATE_SCAN_NETWORKS;
+            
+            state = STATE_SLEEP;
             break;
-
+        case STATE_SLEEP:
+            power_off_modem();
+            state = STATE_WAIT_EVENT;
+        break;
         default:
             break;
         }
