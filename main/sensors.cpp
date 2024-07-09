@@ -176,8 +176,10 @@ void sensorsTask(void* parameter)
     bool do_calibration1_chan2 = adc_calibration_init(ADC_UNIT_1, ADC_CHANNEL_2, ADC_ATTEN_DB_12, &adc1_cali_chan2_handle);
     bool do_calibration1_chan4 = adc_calibration_init(ADC_UNIT_1, ADC_CHANNEL_4, ADC_ATTEN_DB_12, &adc1_cali_chan4_handle);
     char printLog[3][40] = {'0'};
-    _accCheckTimeout = (-1)*SENSORS_ACC_CHECK_TIMEOUT_MS*1000;
-    _statusTimeout = (-1)*SENSORS_STATUS_TIMEOUT_MS*1000;
+    _accCheckTimeout = 0;
+    _statusTimeout = 0;
+    Acc.Get_X_Axes(_lastAcc);
+
     while(1)
     {
         int64_t now = esp_timer_get_time();
