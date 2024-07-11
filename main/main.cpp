@@ -96,19 +96,6 @@ static void initialize_nvs(void)
     ESP_ERROR_CHECK(err);
 }
 
-static void app_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data)
-{
-    // Isca_t *m_config = (Isca_t *) event_data;
-    if (event_base == APP_EVENT && event_id == APP_EVENT_QUEUE_P2P_SEND)
-    {
-    }
-    if (event_base == APP_EVENT && event_id == APP_EVENT_QUEUE_LRW_SEND)
-    {
-    }
-
-}
-
 void setup()
 {
     esp_console_repl_t *repl = NULL;
@@ -128,18 +115,14 @@ void setup()
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
    
-    /* Prompt to be printed before each line.
-     * This can be customized, made dynamic, etc.
-     */
     repl_config.prompt = PROMPT_STR ">";
     repl_config.max_cmdline_length = 1024;
-    memset(&config, 0, sizeof(config));
-    //config.loraId = LORA_ID; 
+    
     otpInit(NULL);
     otpRead(&readMemory);
 
+    memset(&config, 0, sizeof(config));
     config.loraId = (readMemory.asParam.loraID[0]<<16) + (readMemory.asParam.loraID[1]<<8) + (readMemory.asParam.loraID[2]);
     memcpy(config.nodeDeviceEUI, readMemory.asParam.devEUI, 8);
     memcpy(config.nodeAppEUI, readMemory.asParam.appEUI, 8);
@@ -147,22 +130,22 @@ void setup()
         (readMemory.asParam.devAddr[2]<<8) + readMemory.asParam.devAddr[3];
     memcpy(config.nodeNwsKey, readMemory.asParam.nwSKey, 16);
     memcpy(config.nodeAppsKey, readMemory.asParam.appSKey, 16);
+    
     printf("loraID: %ld | devAddress: %08lX\r\n", config.loraId,config.nodeDevAddr);
     ESP_LOG_BUFFER_HEX("deviceEUI", config.nodeDeviceEUI, sizeof(config.nodeDeviceEUI));
     ESP_LOG_BUFFER_HEX("appEUI", config.nodeAppEUI, sizeof(config.nodeAppEUI));
     ESP_LOG_BUFFER_HEX("nwSKey", config.nodeNwsKey, sizeof(config.nodeNwsKey));
     ESP_LOG_BUFFER_HEX("appSKey", config.nodeAppsKey, sizeof(config.nodeAppsKey));
 
-
-    config.p2pBW = 2; //500kHz
+    config.p2pSF = P2P_SPREADING_FACTOR;
+    config.p2pBW = P2P_BANDWIDTH;
     config.p2pCR = 1;
-    config.p2pTxPower = 22;
-    config.p2pSF = 11;
-    config.p2pTXFreq = 903E6;
-    config.p2pRXFreq = 904E6;
-    config.p2pRXTimeout = P2P_RX_TIMEOUT;
-    config.p2pRXDelay = 0;
-
+    config.p2pTXFreq = P2P_POS_FREQ;
+    config.p2pTxPower = P2P_TX_POWER;
+    config.p2pRxFreq = P2P_CMD_FREQ;
+    config.p2pRxDelay = 0;
+    config.p2pRxTimeout = P2P_RX_TIMEOUT;
+    config.p2pTxTimeout = P2P_TX_TIMEOUT;
 
     config.lrwConfirmed = false;
     config.lrwPosPort = LRW_POS_PORT;
@@ -173,6 +156,12 @@ void setup()
     ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
     ESP_ERROR_CHECK(esp_base_mac_addr_set(mac));
     ESP_LOGW(TAG, "MAC: " MACSTR " ", MAC2STR(mac));
+
+    memcpy(&config.bleMac, mac, sizeof(config.bleMac));
+
+    memcpy(&config.apn, GSM_APN, strlen(GSM_APN));
+    memcpy(&config.gsmServer, GSM_SERVER, strlen(GSM_SERVER));
+    config.gsmPort = GSM_PORT;
 
     button_init_t button = {
         .buttonEventHandler = button_handler,
@@ -185,11 +174,12 @@ void setup()
     
     BiColorStatus::init();
     BiColorStatus::turnOn();
+
     // Low priority numbers denote low priority tasks. The idle task has priority zero (tskIDLE_PRIORITY). 
     xTaskCreatePinnedToCore(sensorsTask, "sensorsTask", 4096, (void*) &config, 5, NULL, 0);
     xTaskCreatePinnedToCore(loraTask, "loraTask", 4096, (void*) &config, 5, NULL, 0);
     xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &config, 6, NULL, 0);
-    xTaskCreate(modem_task_function, "modem_tsk", 8192, NULL, uxTaskPriorityGet(NULL), NULL);
+    xTaskCreate(modem_task_function, "modem_tsk", 8192, (void*) &config, uxTaskPriorityGet(NULL), NULL);
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
 

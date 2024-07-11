@@ -15,9 +15,6 @@
 #define PIN_LED_STATUS_GREEN GPIO_NUM_25
 #define PIN_NUM_SDA         27
 #define PIN_NUM_SCL         26
-
-#define PIN_BAT_ADC_CTRL    GPIO_NUM_15
-
 #define PIN_NUM_LORA_RESET  19	 // LORA RESET
 #define PIN_NUM_LORA_NSS    17	 // LORA SPI CS
 #define PIN_NUM_LORA_SCLK   5	 // LORA SPI CLK
@@ -28,6 +25,9 @@
 #define PIN_NUM_RADIO_TXEN   -1	 // LORA ANTENNA TX ENABLE
 #define PIN_NUM_RADIO_RXEN   -1	 // LORA ANTENNA RX ENABLE
 
+#define PIN_BAT_ADC_CTRL    GPIO_NUM_15
+
+
 #define SCHED_MAX_EVENT_DATA_SIZE APP_TIMER_SCHED_EVENT_DATA_SIZE /**< Maximum size of scheduler events. */
 #define SCHED_QUEUE_SIZE 60										  /**< Maximum number of events in the scheduler queue. */
 
@@ -37,20 +37,23 @@
 
 #define OVER_THE_AIR_ACTIVATION 0
 
-#define LORA_P2P_FREQUENCY 903E6     // [Hz]
-#define LORA_P2P_CMD_FREQUENCY 904E6 // [Hz]
+#define P2P_POS_FREQ 903E6     // [Hz]
+#define P2P_CMD_FREQ 904E6      // [Hz]
 
-#define TX_OUTPUT_POWER 22		// dBm
-#define LORA_BANDWIDTH 2		// [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: Reserved]
-#define LORA_SPREADING_FACTOR 11 // [SF7..SF12]
+#define P2P_TX_POWER 22		
+#define P2P_BANDWIDTH 2		
+#define P2P_SPREADING_FACTOR 11 
 
 #define P2P_RX_TIMEOUT 3000
-#define TX_TIMEOUT_VALUE 3000
+#define P2P_TX_TIMEOUT 500
 
 #define LRW_POS_PORT		5
 #define LRW_STATUS_PORT		5
 #define LRW_CMD_PORT		57
 
+#define GSM_APN "simplepm.algar.br"
+#define GSM_SERVER "0.tcp.sa.ngrok.io"
+#define GSM_PORT 12764
 
 #pragma pack(1)
 
@@ -104,6 +107,7 @@ typedef struct
     uint8_t hwVer;
     uint32_t loraId;
     uint8_t bleMac[6];
+    uint8_t imei[7];
     uint8_t nodeDeviceEUI[8];
     uint8_t nodeAppEUI[8];
     uint8_t nodeAppKey[8];
@@ -120,23 +124,27 @@ typedef struct
     char gsmPswd[64];
     uint16_t gsmPort;
     char gsmServer[64];
-    uint32_t p2pTXFreq;
-    uint32_t p2pRXFreq;
-    uint32_t p2pRXDelay;
-    uint8_t p2pBW;
-    uint8_t p2pSF;
+    //P2P
+    uint8_t p2pSF; // [SF7..SF12]
+    uint8_t p2pBW; // [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: Reserved]
     uint8_t p2pCR;
-    uint8_t p2pTxPower;
+    uint32_t p2pTXFreq;
+    uint32_t p2pTxTimeout; //rx window (ms)
+    uint8_t p2pTxPower; // dBm
+    uint32_t p2pRxFreq;
+    uint32_t p2pRxTimeout; //rx window (ms)
+    uint32_t p2pRxDelay; //delay from tx done (ms)
+    //LRW
     uint8_t lrwSF;
-    uint32_t p2pRXTimeout;
     bool lrwADR;
     bool lrwConfirmed;
     uint8_t lrwPosPort;
     uint8_t lrwCmdPort;
     uint8_t lrwStaPort;
-    
+    //BLE
 	uint8_t blePower;
 	uint16_t bleAdvTime;
+    //TIMERS
 	uint32_t p2pMovNorm : 20;
 	uint32_t p2pMovEmer  : 20;
 	uint32_t p2pStpNorm : 20;

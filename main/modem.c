@@ -1,6 +1,5 @@
 #include "esp_log.h"
 #include <esp_check.h>
-#include <cJSON.h>
 #include "esp_netif.h"
 #include "esp_netif_ppp.h"
 #include "driver/gpio.h"
@@ -9,7 +8,8 @@
 #include "sys/time.h"
 #include "stateMachine.hpp"
 #include "modem.hpp"
- #define CORE_DEBUG_LEVEL   5
+#include "mbedtls/base64.h"
+
 static const char *TAG = "MDM_TSK";
 
 #define GPIO_PIN_SEL(pin) (1ULL << pin)
@@ -19,13 +19,8 @@ static const char *TAG = "MDM_TSK";
 #define GPIO_OUTPUT_POWER_ON ((gpio_num_t)GPIO_NUM_13)
 #define GPIO_OUTPUT_RST ((gpio_num_t)GPIO_NUM_NC)
 
-#define SETTINGS_DEFAULT_GSM_APN "simplepm.algar.br"
-#define SETTINGS_DEFAULT_SERVER "0.tcp.sa.ngrok.io"
-#define SETTINGS_DEFAULT_SERVER_PORT 12561
-
-#define SETTINGS_DEFAULT_SENDING_INTERVAL 60000
-
 static GSMElementTx_t gsmTx;
+static Isca_t *m_config;
 
 typedef enum
 {
@@ -44,6 +39,7 @@ typedef enum
     STATE_WAIT_EVENT,
     STATE_SLEEP,
     STATE_POWERON,
+    STATE_ERROR_TIMEOUT,
 } en_task_state;
 
 typedef enum
@@ -89,9 +85,6 @@ typedef struct
     int c2;     // C2 value
 } mdm_lbs_cell_t;
 
-
-
-
 struct tm tm;
 
 const char* printError(esp_err_t ret)
@@ -125,7 +118,7 @@ const char* printError(esp_err_t ret)
         case ESP_ERR_NOT_ALLOWED:
         return "ESP_ERR_NOT_ALLOWED";
         default:
-        return "UNKNOW_ESP_ERR";
+        return "UNKNOWN_ESP_ERR";
     }
 
 }
@@ -148,29 +141,21 @@ QueueHandle_t _internal_queue;
 
 void power_on_modem(esp_modem_dce_t *dce)
 {
-    // gpio_set_level(GPIO_OUTPUT_POWER_ON, false);
-    // gpio_set_level(GPIO_OUTPUT_RST, true);
-
-    /* Power on the modem */
     ESP_LOGI(TAG, "Power on the modem");
-    //gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
-    vTaskDelay(pdMS_TO_TICKS(500));
+    gpio_set_level(GPIO_OUTPUT_PWRKEY, 0);
+    vTaskDelay(pdMS_TO_TICKS(1000));
     gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
     vTaskDelay(pdMS_TO_TICKS(2000));
     gpio_set_level(GPIO_OUTPUT_PWRKEY, 0);
     vTaskDelay(pdMS_TO_TICKS(2700));
-    // CHECK_ERR(esp_modem_sync(dce), ESP_LOGI(TAG, "OK"));
 }
 
-void power_off_modem()
+void power_off_modem(esp_modem_dce_t *dce)
 {
+    char _response[512] = {};
     ESP_LOGI(TAG, "Power off the modem");
-    // gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
-    // vTaskDelay(pdMS_TO_TICKS(500));
-    gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    gpio_set_level(GPIO_OUTPUT_PWRKEY, 0);
-    //vTaskDelay(pdMS_TO_TICKS(2700));
+    esp_err_t re = esp_modem_at(dce, "AT+CPOWD=1", _response, 1500);
+    ESP_LOGW(TAG, "ret: %d %s | _response: %s", re, printError(re), _response);
 }
 
 void config_pwrkey_gpio(void)
@@ -187,74 +172,9 @@ void config_pwrkey_gpio(void)
 
     gpio_set_level(GPIO_OUTPUT_POWER_ON, true);
     gpio_set_level(GPIO_OUTPUT_PWRKEY, false);
-
-    power_off_modem();
-    vTaskDelay(2000);
 }
 
-
-char *generate_position_json(mdm_lbs_cell_t *cells, task_data_t *task_data)
-{
-    char *string = NULL;
-    // esp_err_t ret;
-    cJSON *root, *data;
-
-    root = cJSON_CreateObject();
-
-    cJSON_AddStringToObject(
-        root,
-        "type",
-        "location");
-    cJSON_AddStringToObject(
-        root,
-        "imei",
-        task_data->imei);
-    cJSON_AddStringToObject(
-        root,
-        "fw",
-        "0.0.1");
-    cJSON_AddStringToObject(
-        root,
-        "hw",
-        "1.0");
-
-    cJSON_AddStringToObject(
-        root,
-        "time",
-        task_data->date_time);
-
-    data = cJSON_AddObjectToObject(
-        root,
-        "flags");
-
-    cJSON_AddBoolToObject(data, "emergency", false);
-    cJSON_AddBoolToObject(data, "jammGSM", false);
-    cJSON_AddBoolToObject(data, "jammLora", false);
-    cJSON_AddBoolToObject(data, "lowBat", false);
-
-    data = cJSON_AddArrayToObject(root, "erbs");
-
-    for (int i = 0; i < 7; i++)
-    {
-        if (cells[i].bcch != 0)
-        {
-            cJSON *erb = cJSON_CreateObject();
-
-            cJSON_AddNumberToObject(erb, "id", cells[i].cell);
-            cJSON_AddNumberToObject(erb, "lac", cells[i].lac);
-            cJSON_AddNumberToObject(erb, "mcc", cells[i].mcc);
-            cJSON_AddNumberToObject(erb, "mnc", cells[i].mnc);
-            cJSON_AddNumberToObject(erb, "bsic", cells[i].bsic);
-            cJSON_AddNumberToObject(erb, "cellid", cells[i].cellid);
-            cJSON_AddNumberToObject(erb, "ta", cells[i].ta);
-
-            cJSON_AddItemToArray(data, erb);
-        }
-    }
-    string = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    return string;
-}
+//  https://github.com/whik/crc-lib-c/blob/master/crcLib.c
 uint8_t crc8_itu(uint8_t *data, uint16_t length)
 {
     uint8_t i;
@@ -273,10 +193,9 @@ uint8_t crc8_itu(uint8_t *data, uint16_t length)
     return crc ^ 0x55;
 }
 
-char *generate_position_hex(mdm_lbs_cell_t *cells, GSMElementTx_t *_data)
+char *generate_position_hex(mdm_lbs_cell_t *cells, GSMElementTx_t *_data, uint8_t *size)
 {
-    char *string = NULL;
-    uint8_t *hexArray = NULL;
+    char *hexArray = NULL;
     uint8_t numberErbs = 0;
 
     for (int i = 0; i < 7; i++)
@@ -288,7 +207,7 @@ char *generate_position_hex(mdm_lbs_cell_t *cells, GSMElementTx_t *_data)
     }
     uint8_t positionHexSize = sizeof(GSMElementTx_t) + numberErbs*sizeof(GSMERBPacket_t);
     hexArray = calloc(positionHexSize, sizeof(uint8_t));
-
+    *size = positionHexSize;
     _data->n_erbs =  numberErbs;
     memcpy(hexArray, _data, sizeof(GSMElementTx_t));
 
@@ -316,19 +235,12 @@ char *generate_position_hex(mdm_lbs_cell_t *cells, GSMElementTx_t *_data)
             erbPacket_p->lac[4] = (cells[i].lac) * 0xff;
         }
     }
-    uint8_t crc_calc=crc8_itu( hexArray, positionHexSize);
+
+    uint8_t crc_calc=crc8_itu((uint8_t*)hexArray, positionHexSize);
     GSMElementTx_t *element_p = (GSMElementTx_t*)hexArray;
     element_p->crc = crc_calc;
 
-
-    string = calloc(positionHexSize*2+1, sizeof(uint8_t));
-    for(uint8_t i = 0; i < positionHexSize; i++)
-    {
-        sprintf(string+i*2, "%02X", *(hexArray + i));
-    }
-    *(string + positionHexSize*2) = 0x00;
-    free(hexArray);
-    return string;
+    return hexArray;
 }
 
 static void app_event_handler(void *arg, esp_event_base_t event_base,
@@ -342,6 +254,46 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
+const char* printState(en_task_state state)
+{
+    switch(state)
+    {
+        case STATE_INIT:
+            return "STATE_INIT";
+        case STATE_DEINIT:
+            return "STATE_DEINIT";
+        case STATE_SYNC:
+            return "STATE_SYNC";
+        case STAT_CONFIG_PRMS:
+            return "STAT_CONFIG_PRMS";
+        case STATE_CHECK_SIGNAL:
+            return "STATE_CHECK_SIGNAL";
+        case STATE_CHECK_OPERERATOR:
+            return "STATE_CHECK_OPERERATOR";
+        case STATE_SCAN_NETWORKS:
+            return "STATE_SCAN_NETWORKS";
+        case STATE_GET_IP:
+            return "STATE_GET_IP";
+        case STATE_GET_LBS_POSITION:
+            return "STATE_GET_LBS_POSITION";
+        case STATE_CHECK_IP:
+            return "STATE_CHECK_IP";
+        case STATE_SEND_PACKET:
+            return "STATE_SEND_PACKET";
+        case STATE_RECEIVE_PACKET:
+            return "STATE_RECEIVE_PACKET";
+        case STATE_WAIT_EVENT:
+            return "STATE_WAIT_EVENT";
+        case STATE_SLEEP:
+            return "STATE_SLEEP";
+        case STATE_POWERON:
+            return "STATE_POWERON";
+        case STATE_ERROR_TIMEOUT:
+            return "STATE_ERROR_TIMEOUT";
+    }
+    return "unknown state";
+}
+
 void modem_task_function(void *pvParameters)
 {
     esp_err_t err;
@@ -352,6 +304,8 @@ void modem_task_function(void *pvParameters)
     char response[512] = {};
     mdm_lbs_cell_t cells[7] = {};
     GSMElementTx_t gsmElement;
+    
+    m_config = (Isca_t*) pvParameters;
     ESP_LOGI(TAG, "modem task starting");
 
     /* Configure and create the UART DTE */
@@ -361,7 +315,7 @@ void modem_task_function(void *pvParameters)
     dte_config.uart_config.rx_io_num = RXD_PIN;
     dte_config.uart_config.rts_io_num = -1;
     dte_config.uart_config.cts_io_num = -1;
-    esp_modem_dce_config_t dce_config = ESP_MODEM_DCE_DEFAULT_CONFIG(SETTINGS_DEFAULT_GSM_APN);
+    esp_modem_dce_config_t dce_config = ESP_MODEM_DCE_DEFAULT_CONFIG(m_config->apn);
     esp_netif_config_t netif_ppp_config = ESP_NETIF_DEFAULT_PPP();
     esp_netif_t *esp_netif = esp_netif_new(&netif_ppp_config);
     assert(esp_netif);
@@ -374,13 +328,14 @@ void modem_task_function(void *pvParameters)
 
     for (;;)
     {
+        ESP_LOGI(TAG, "%s", printState(state));
         switch (state)
         {
 
         case STATE_INIT:
             //@ TODO - Usar funções para checar alocação do recurso
             _internal_queue = xQueueCreate(10, sizeof(GSMElementTx_t));
-            esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, NULL, NULL);
+            esp_event_handler_instance_register(APP_EVENT, APP_EVENT_REQ_GSM_SEND, &app_event_handler, NULL, NULL);
             state = STATE_SLEEP;
             break;
 
@@ -389,26 +344,30 @@ void modem_task_function(void *pvParameters)
             // TODO - Desalocar recursos que foram criados nesse estado.
             break;
 
+        case STATE_SLEEP:
+            power_off_modem(dce);
+            state = STATE_WAIT_EVENT;
+        break;
+
         case STATE_WAIT_EVENT:
-                //vTaskDelay(pdMS_TO_TICKS(60000));
-                if(xQueueReceive(_internal_queue, &gsmElement, portMAX_DELAY))
-                {
-                    state = STATE_POWERON;
-                }
+            if(xQueueReceive(_internal_queue, &gsmElement, portMAX_DELAY))
+            {
+                state = STATE_POWERON;
+            }
             break;
 
         case STATE_POWERON:
             power_on_modem(dce);
-            esp_err_t ret = ESP_OK;
-            ret = esp_modem_sync(dce);
-            if(ret == ESP_OK)
+            esp_err_t _ret = ESP_OK;
+            _ret = esp_modem_sync(dce);
+            if(_ret == ESP_OK)
             {
                 state = STATE_SYNC;
             }
             else
             {
-                ESP_LOGE(TAG, "Error PowerOn: %d", ret);
-                state = STATE_WAIT_EVENT;
+                ESP_LOGE(TAG, "Error PowerOn: %d", _ret);
+                state = STATE_SLEEP;
             }
             break;
 
@@ -419,7 +378,6 @@ void modem_task_function(void *pvParameters)
             {
                 esp_modem_at(dce, "ATE0", response, 1000);
                 esp_modem_at(dce, "AT+CLTS=1", response, 1000);
-                // esp_modem_set_echo(dce, false);
                 state = STATE_CHECK_SIGNAL;
             }
             else
@@ -427,35 +385,48 @@ void modem_task_function(void *pvParameters)
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;
             }
-
-            if (esp_modem_get_imei(dce, task_data.imei) == ESP_OK)
-                ESP_LOGI(TAG, "Modem imei: %s", task_data.imei);
+            if(strlen(task_data.imei) == 0)
+            {
+                if (esp_modem_get_imei(dce, task_data.imei) == ESP_OK)
+                {
+                    ESP_LOGI(TAG, "Modem imei: %s", task_data.imei);
+                    uint64_t _imei = strtoll(task_data.imei, NULL, 10);
+                    m_config->imei[0] = (_imei>>(6*8)) & 0xFF;
+                    m_config->imei[1] = (_imei>>(5*8)) & 0xFF;
+                    m_config->imei[2] = (_imei>>(4*8)) & 0xFF;
+                    m_config->imei[3] = (_imei>>(3*8)) & 0xFF;
+                    m_config->imei[4] = (_imei>>(2*8)) & 0xFF;
+                    m_config->imei[5] = (_imei>>(1*8)) & 0xFF;
+                    m_config->imei[6] = (_imei) & 0xFF;
+                }
+            }
 
             vTaskDelay(1000);
             esp_modem_at(dce, "AT+COPS=0", response, 5000);
-            // esp_modem_at(dce, "AT+COPS=2", response, 5000);
-            // esp_modem_at(dce, "AT+SIMEI=863070046562780", response, 1000);
-            // esp_modem_at(dce, "AT+COPS=0", response, 5000);
-            // /* code */
             break;
 
         case STATE_CHECK_SIGNAL:
 
             int *prms = (int *)calloc(sizeof(int), 2);
 
-            CHECK_ERR(esp_modem_get_signal_quality(dce, &prms[0], &prms[1]), ESP_LOGI(TAG, "rssi: %i, bear: %i", prms[0], prms[1]));
-
-            if (prms[0] > 5)
+            //CHECK_ERR(esp_modem_get_signal_quality(dce, &prms[0], &prms[1]), ESP_LOGI(TAG, "rssi: %i, bear: %i", prms[0], prms[1]));
+            esp_err_t re = esp_modem_get_signal_quality(dce, &prms[0], &prms[1]);
+            if(re == ESP_OK)
             {
-                // esp_modem_at(dce, "AT+COPS=0", data, 500);
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                esp_modem_at(dce, "AT+CENG=4,1", response, 500);
-                // esp_modem_set_operator(dce, 0);
-                state = STATE_CHECK_OPERERATOR;
+                if (prms[0] > 5)
+                {
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    esp_modem_at(dce, "AT+CENG=4,1", response, 500);
+                    state = STATE_CHECK_OPERERATOR;
+                }
+            } 
+            else if (re == ESP_ERR_TIMEOUT)
+            {
+                state = STATE_ERROR_TIMEOUT;
             }
             else
                 vTaskDelay(1000);
-            /* code */
+
             free(prms);
             break;
 
@@ -464,17 +435,25 @@ void modem_task_function(void *pvParameters)
             char *name = (char *)calloc(64, 1);
             int *val = calloc(sizeof(int), 1);
 
-            CHECK_ERR(esp_modem_get_operator_name(dce, name, val), ESP_LOGI(TAG, "OK. %s %i", name, *val));
-
-            if (strlen(name) > 0)
+            //CHECK_ERR(esp_modem_get_operator_name(dce, name, val), ESP_LOGI(TAG, "OK. %s %i", name, *val));
+            esp_err_t _rt = esp_modem_get_operator_name(dce, name, val);
+            if(_rt == ESP_OK)
             {
-                // CHECK_ERR(esp_modem_at(dce, "AT+CNETSCAN=1", data, 500), ESP_LOGI(TAG, "OK"));
-                state = STATE_SCAN_NETWORKS;
+                ESP_LOGI(TAG, "OK. %s %i", name, *val);
+                if (strlen(name) > 0)
+                {
+                    state = STATE_SCAN_NETWORKS;
+                }
+
+            } else if(_rt == ESP_ERR_TIMEOUT)
+            {
+                state = STATE_ERROR_TIMEOUT;
+            }
+            else
+            {
+                vTaskDelay(1000);
             }
 
-            else
-                vTaskDelay(1000);
-            /* code */
             free(name);
             free(val);
             break;
@@ -585,7 +564,6 @@ void modem_task_function(void *pvParameters)
             tm.tm_sec = second;
             time_t t = mktime(&tm);
 
-            //int32_t unixtempo = (int32_t) t;
             struct timeval tv;
             tv.tv_sec = t;
             printf("Setting time: %s | %lld\r\n", asctime(&tm), t);
@@ -595,18 +573,9 @@ void modem_task_function(void *pvParameters)
             gettimeofday(&current, NULL);
             printf(" Second : %llu \n Microsecond : %06lu\r\n",
                 current.tv_sec, current.tv_usec);
-            // struct timeval now = { .tv_sec = t };
-            // settimeofday(&now, NULL);
-
-
-
-
             char buf[255];
             strftime(buf, sizeof(buf), "%d %b %Y %H:%M:%S", &tm);
             ESP_LOGW(TAG, "%s", buf);
-            // CHECK_ERR(, ESP_LOGI(TAG, "%s", response));
-
-            // vTaskDelay(pdMS_TO_TICKS());
             state = STATE_SEND_PACKET;
             /* code */
             break;
@@ -649,7 +618,7 @@ void modem_task_function(void *pvParameters)
 
         case STATE_SEND_PACKET:
 
-            sprintf(command, "AT+CSTT=\"%s\"", SETTINGS_DEFAULT_GSM_APN);
+            sprintf(command, "AT+CSTT=\"%s\"", m_config->apn);
             esp_modem_at(dce, command, response, 1000);
 
             // bring ip up
@@ -661,28 +630,9 @@ void modem_task_function(void *pvParameters)
             esp_modem_at(dce, command, response, 1000);
 
             // start socket with server
-            sprintf(command, "AT+CIPSTART=\"TCP\",\"%s\",\"%d\"\r\n", SETTINGS_DEFAULT_SERVER, SETTINGS_DEFAULT_SERVER_PORT);
+            sprintf(command, "AT+CIPSTART=\"TCP\",\"%s\",\"%d\"\r\n", m_config->gsmServer, m_config->gsmPort);
             esp_modem_at_raw(dce, command, response, "CONNECT OK", "ERROR", 5000);
 
-#ifdef _SEND_JSON
-            char *json = generate_position_json(cells, &task_data);
-            ESP_LOGI(TAG, "Sending JSON: %s", json);
-
-            sprintf(command, "AT+CIPSEND=%d\r", strlen(json));
-            err = esp_modem_at_raw(dce, command, response, ">", "ERROR", 500);
-
-            // send request was accepted
-            if (err == ESP_OK)
-            {
-                err = esp_modem_at_raw(dce, json, response, "SEND OK", "SEND FAIL", 90 * 1000);
-
-                if (err)
-                    ESP_LOGW(TAG, "Fail to send packet");
-                else
-                    ESP_LOGI(TAG, "Success to send packet");
-            }
-            free(json);
-#else
             uint64_t _imei = strtoll(task_data.imei, NULL, 10);
             gsmElement.imei[0] = (_imei>>(6*8)) & 0xFF;
             gsmElement.imei[1] = (_imei>>(5*8)) & 0xFF;
@@ -691,35 +641,53 @@ void modem_task_function(void *pvParameters)
             gsmElement.imei[4] = (_imei>>(2*8)) & 0xFF;
             gsmElement.imei[5] = (_imei>>(1*8)) & 0xFF;
             gsmElement.imei[6] = (_imei) & 0xFF;
-            char *hex = generate_position_hex(cells, &gsmElement);
-            ESP_LOGI(TAG, "Sending HEX: %s", hex);
+            uint8_t size;
+            char *hex = generate_position_hex(cells, &gsmElement, &size);
 
-            sprintf(command, "AT+CIPSEND=%d\r", strlen(hex));
+            char string[512];
+            for(uint8_t i = 0; i < size; i++)
+            {
+                sprintf(&string[i*2], "%02X", *(hex + i));
+            }
+            string[size*2] = 0x00;
+
+            ESP_LOGI(TAG, "To: %s:%d | Sending HEX %d bytes: %s", m_config->gsmServer, m_config->gsmPort, size, string);
+            char encode64[450] = {0};
+	        size_t len_encoded = 0;
+
+            mbedtls_base64_encode((unsigned char*)encode64, sizeof(encode64),&len_encoded, (unsigned char*)hex, size );
+            ESP_LOGW(TAG, "base64: %s", encode64);
+
+            sprintf(command, "AT+CIPSEND=%d\r", len_encoded);
             err = esp_modem_at_raw(dce, command, response, ">", "ERROR", 500);
 
             // send request was accepted
             if (err == ESP_OK)
             {
-                err = esp_modem_at_raw(dce, hex, response, "SEND OK", "SEND FAIL", 90 * 1000);
+                err = esp_modem_at_raw(dce, encode64, response, "SEND OK", "SEND FAIL", 90 * 1000);
 
                 if (err)
                     ESP_LOGW(TAG, "Fail to send packet");
                 else
                     ESP_LOGI(TAG, "Success to send packet");
             }
+            else
+            {
+                ESP_LOGW(TAG, "Send Request Fail: %d %s", err, printError(err));
+            }
             free(hex);
 
-#endif
             // fecha socket após envio.
             sprintf(command, "AT+CIPCLOSE");
             esp_modem_at(dce, command, response, 5000);
             
             state = STATE_SLEEP;
             break;
-        case STATE_SLEEP:
-            power_off_modem();
-            state = STATE_WAIT_EVENT;
-        break;
+
+        case STATE_ERROR_TIMEOUT:
+            state = STATE_SLEEP;
+            break;
+
         default:
             break;
         }

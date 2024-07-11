@@ -650,10 +650,10 @@ void stateTask (void* pvParameters)
                 p2pTx.params.BW = m_config->p2pBW;
                 p2pTx.params.SF = m_config->p2pSF;
                 p2pTx.params.CR = m_config->p2pCR;
-                p2pTx.params.rxFreq = m_config->p2pRXFreq;
-                p2pTx.params.rxDelay = m_config->p2pRXDelay;
-                p2pTx.params.rxTimeout = m_config->p2pRXTimeout;
-               
+                p2pTx.params.rxFreq = m_config->p2pRxFreq;
+                p2pTx.params.rxDelay = m_config->p2pRxDelay;
+                p2pTx.params.rxTimeout = m_config->p2pRxTimeout;
+                p2pTx.params.txTimeout = m_config->p2pTxTimeout;
                 esp_event_post(APP_EVENT, APP_EVENT_QUEUE_P2P_SEND, (void*)&p2pTx, sizeof(LoRaElementP2P_t), 0);
 
                 state = SM_WAIT_FOR_EVENT;

@@ -85,7 +85,8 @@ typedef struct {
 typedef struct 
 {
     uint32_t txFreq;
-    uint8_t txPower;    
+    uint8_t txPower;
+    uint8_t txTimeout;    
     uint8_t BW;
     uint8_t SF;
     uint8_t CR;

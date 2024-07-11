@@ -81,11 +81,6 @@ static void adc_calibration_deinit(adc_cali_handle_t handle)
     ESP_ERROR_CHECK(adc_cali_delete_scheme_line_fitting(handle));
 }
 
-static void app_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data)
-{
-}
-
 const char* printBatStatus(SensorsBatStatus_t type)
 {
     switch(type)
@@ -126,8 +121,6 @@ static void debounceMovingCallback(void *args)
 void sensorsTask(void* parameter)
 {
     m_config = (Isca_t*) parameter;
-
-    esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
     
     const esp_timer_create_args_t debounceMovingArgs = {
         .callback = &debounceMovingCallback,
@@ -226,7 +219,7 @@ void sensorsTask(void* parameter)
             if((diffAcc[0] > ACC_MG_DIFF) ||  (diffAcc[1] > ACC_MG_DIFF) || (diffAcc[2] > ACC_MG_DIFF))
             {
                 accIntFlag = true;
-                ESP_LOGW(TAG, "[ACC]-------- accIntFlag from %d m/s^2 change detection --------\r\n", ACC_MG_DIFF);
+                ESP_LOGW(TAG, "[ACC]-------- accIntFlag from %d mg change detection --------\r\n", ACC_MG_DIFF);
             }
             _lastAcc[0] = _acc[0];
             _lastAcc[1] = _acc[1];
@@ -288,13 +281,17 @@ void sensorsTask(void* parameter)
             {
                 _sensorStatus.batStatus = BAT_DISCHARGING;
             }
-            else if(voltage[1] < 1800)
+            else if(voltage[1] < 1800 && voltage[2] > 1800)
             {
                 _sensorStatus.batStatus = BAT_CHARGING;
             }
-            else
+            else if(voltage[1] > 1800 && voltage[2] < 1800)
             {
                 _sensorStatus.batStatus = BAT_CHARGED;
+            }
+            else if(voltage[1] < 1800 && voltage[2] < 1800)
+            {
+            
             }
             
             Acc.Get_Temperature(&_temperature);
@@ -303,9 +300,9 @@ void sensorsTask(void* parameter)
             _sensorStatus.batVoltage = 2*voltage[0];
             memcpy(&_sensorStatus.acc, _acc, sizeof(_sensorStatus.acc));
 
-            // ESP_LOGW(TAG, "[ACC](mg) x:%ld | y:%ld | z:%ld | [TEMP](oC) %02.2f | %s %s %s | batStatus:%s", 
-            //         _acc[0], _acc[1], _acc[2], _temperature,
-            //         printLog[0], printLog[1], printLog[2], printBatStatus((SensorsBatStatus_t)_sensorStatus.batStatus));
+            ESP_LOGW(TAG, "[ACC](mg) x:%ld | y:%ld | z:%ld | [TEMP](oC) %02.2f | %s %s %s | batStatus:%s", 
+                    _acc[0], _acc[1], _acc[2], _temperature,
+                    printLog[0], printLog[1], printLog[2], printBatStatus((SensorsBatStatus_t)_sensorStatus.batStatus));
             
             esp_event_post(APP_EVENT, APP_EVENT_SENSORS_STATUS, &_sensorStatus, sizeof(SensorsStatus_t), 0);
         }

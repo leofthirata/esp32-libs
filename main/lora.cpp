@@ -260,15 +260,21 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
 }
 
 void loraTask(void* param)
-{
-	
+{	
 	Isca_t *config = (Isca_t*) param;
 	LoRaQueueElement_t loraQueueElement2Send = {.type = QUEUE_NONE};
     
+	uint32_t ulNotifiedValue = 0;
+	const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 10000 );
+	LoRaElementP2P_t p2pElement;
+	LoRaElementLRWTx_t lrwElement;
+
 	xQueueLoRa = xQueueCreate( LORA_TX_QUEUE_SIZE, sizeof( LoRaQueueElement_t ) );
 	xQueueSendP2P = xQueueCreate(5, sizeof(LoRaElementP2P_t));
 	xQueueSendLRW = xQueueCreate(5, sizeof(LoRaElementLRWTx_t));
+	
 	xTaskToNotify = xTaskGetCurrentTaskHandle();
+
 	// Define the HW configuration between MCU and SX126x
 	hwConfig.CHIP_TYPE = SX1262_CHIP;		  // Example uses an eByte E22 module with an SX1262
 	hwConfig.PIN_LORA_RESET = PIN_NUM_LORA_RESET; // LORA RESET
@@ -284,8 +290,11 @@ void loraTask(void* param)
 	hwConfig.USE_DIO3_TCXO = false;			  // Example uses an CircuitRocks Alora RFM1262 which uses DIO3 to control oscillator voltage
 	hwConfig.USE_DIO3_ANT_SWITCH = false;	  // Only Insight ISP4520 module uses DIO3 as antenna control
     
-	esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
-
+	esp_event_handler_instance_register(APP_EVENT, APP_EVENT_QUEUE_P2P_SEND,
+									 &app_event_handler, nullptr, nullptr);
+	esp_event_handler_instance_register(APP_EVENT, APP_EVENT_QUEUE_LRW_SEND,
+									 &app_event_handler, nullptr, nullptr);
+									  
 	// Initialize LoRa chip.
 	uint32_t err_code = lora_hardware_init(hwConfig);
 	if (err_code != 0)
@@ -318,11 +327,8 @@ void loraTask(void* param)
 
 	// Start Join procedure
 	lmh_join();
-	uint32_t ulNotifiedValue = 0;
-	const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 10000 );
-	LoRaElementP2P_t p2pElement;
-	LoRaElementLRWTx_t lrwElement;
-    while(1)
+
+	while(1)
     {
         ESP_LOGI(TAG, "%s", printLoRaStateMachineState(state));
 		switch(state)
@@ -458,7 +464,7 @@ void loraTask(void* param)
 					Radio.SetTxConfig(MODEM_LORA, p2pElement.params.txPower, 0, p2pElement.params.BW,
 									p2pElement.params.SF, p2pElement.params.CR,
 									LORA_PREAMBLE_LENGTH, LORA_FIX_LENGTH_PAYLOAD_ON,
-									true, 0, 0, LORA_IQ_INVERSION_ON, TX_TIMEOUT_VALUE);
+									true, 0, 0, LORA_IQ_INVERSION_ON, p2pElement.params.txTimeout);
 					
 					Radio.Send(p2pElement.payload.buffer, p2pElement.payload.size);
 					
