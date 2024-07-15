@@ -189,6 +189,13 @@ public:
     esp_err_t gsm_get_last_position(char *json, size_t *len);
 
     /**
+     * @brief Read last position ID.
+     *
+     * @return
+     */
+    esp_err_t gsm_get_id(uint32_t *id);
+
+    /**
      * @brief Remove all keys from GSM namespace.
      *
      * @return

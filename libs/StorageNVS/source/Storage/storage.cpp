@@ -412,11 +412,15 @@ esp_err_t Storage::gsm_save_id()
     return nvs_commit(m_gsm_position_nvs);
 }
 
+esp_err_t Storage::gsm_get_id(uint32_t *id)
+{
+    return get_id(id);
+}
+
 esp_err_t Storage::set_id(uint32_t *id)
 {
     m_id = *id;
     esp_err_t err = gsm_save_id();
-    printf("set_id: %ld\r\n", m_id);
 
     return err;
 }
@@ -426,7 +430,6 @@ esp_err_t Storage::get_id(uint32_t *id)
     uint32_t temp = 0;
     esp_err_t err = nvs_get_u32(m_gsm_position_nvs, "id", &temp);
     *id = temp;
-    printf("get_id: %ld\r\n", temp);
 
     return err;
 }
