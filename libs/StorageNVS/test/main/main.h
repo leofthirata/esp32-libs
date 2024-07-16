@@ -3,8 +3,9 @@
 
 #pragma pack(1)
 
-#include <cstring>
-#include <cstdint>
+#include <string.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 typedef struct
 {
