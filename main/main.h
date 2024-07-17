@@ -5,8 +5,9 @@
 #define ESP32	1
 #define LIB_DEBUG 0
 #define CORE_DEBUG_LEVEL	ARDUHAL_LOG_LEVEL_NONE
-
+#define ESP_MODEM_C_API_STR_MAX 512
 #include "Arduino.h"
+#include "sdkconfig.h"
 
 #define PROMPT_STR "fk-isca"
 
@@ -53,7 +54,7 @@
 
 #define GSM_APN "simplepm.algar.br"
 #define GSM_SERVER "0.tcp.sa.ngrok.io"
-#define GSM_PORT 12764
+#define GSM_PORT 10235
 
 #pragma pack(1)
 
@@ -84,10 +85,8 @@ typedef union
 	uint8_t array[5];
 } DoubleWordArrayUnion_t;
 
-
 typedef struct
 {
-	//status
     FlagsIscaUnion_t flags;
     int16_t batteryMiliVolts;
     int8_t temperatureCelsius;
@@ -102,50 +101,58 @@ typedef struct
     uint16_t GSMCount;
     int32_t acc[3];
     float temperatureFloat;
-    
-    //otp
+} IscaStatus_t;
+
+typedef struct
+{
     uint8_t hwVer;
     uint32_t loraId;
     uint8_t bleMac[6];
     uint8_t imei[7];
-    uint8_t nodeDeviceEUI[8];
-    uint8_t nodeAppEUI[8];
-    uint8_t nodeAppKey[8];
-    uint32_t nodeDevAddr;
-    uint8_t nodeNwsKey[16];
-    uint8_t nodeAppsKey[16];
+    uint8_t deviceEUI[8];
+    uint8_t appEUI[8];
+    uint8_t appKey[8];
+    uint32_t devAddr;
+    uint8_t nwkSKey[16];
+    uint8_t appSKey[16];
+} IscaROM_t;
 
-    //configuration
-    char* fwVer;
-    uint8_t fwVerProtocol;
-    uint8_t lrwProtocol;
+typedef struct
+{
     char apn[64];
-    char gsmUser[64];
-    char gsmPswd[64];
-    uint16_t gsmPort;
-    char gsmServer[64];
-    //P2P
-    uint8_t p2pSF; // [SF7..SF12]
-    uint8_t p2pBW; // [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: Reserved]
-    uint8_t p2pCR;
-    uint32_t p2pTXFreq;
-    uint32_t p2pTxTimeout; //rx window (ms)
-    uint8_t p2pTxPower; // dBm
-    uint32_t p2pRxFreq;
-    uint32_t p2pRxTimeout; //rx window (ms)
-    uint32_t p2pRxDelay; //delay from tx done (ms)
-    //LRW
-    uint8_t lrwSF;
-    bool lrwADR;
-    bool lrwConfirmed;
-    uint8_t lrwPosPort;
-    uint8_t lrwCmdPort;
-    uint8_t lrwStaPort;
-    //BLE
-	uint8_t blePower;
-	uint16_t bleAdvTime;
-    //TIMERS
-	uint32_t p2pMovNorm : 20;
+    char user[64];
+    char pswd[64];
+    uint16_t port;
+    char server[64];
+}IscaGSMConfig_t;
+
+typedef struct
+{
+    uint8_t sf; // [SF7..SF12]
+    uint8_t bw; // [0: 125 kHz, 1: 250 kHz, 2: 500 kHz, 3: Reserved]
+    uint8_t cr;
+    uint32_t txFreq;
+    uint32_t txTimeout; //rx window (ms)
+    uint8_t txPower; // dBm
+    uint32_t rxFreq;
+    uint32_t rxTimeout; //rx window (ms)
+    uint32_t rxDelay; //delay from tx done (ms)
+} IscaP2PConfig_t;
+
+typedef struct
+{
+    uint8_t protocol;
+    uint8_t sf;
+    bool adr;
+    bool confirmed;
+    uint8_t posPort;
+    uint8_t cmdPort;
+    uint8_t statusPort;
+} IscaLRWConfig_t;
+
+typedef struct
+{
+    uint32_t p2pMovNorm : 20;
 	uint32_t p2pMovEmer  : 20;
 	uint32_t p2pStpNorm : 20;
 	uint32_t p2pStpEmer  : 20;
@@ -157,6 +164,30 @@ typedef struct
 	uint32_t gsmMovEmer  : 20;
 	uint32_t gsmStpNorm : 20;
 	uint32_t gsmStpEmer  : 20;
+} IscaTimers_t;
+
+typedef struct
+{
+	//status
+    IscaStatus_t status;
+    
+    //rom
+    IscaROM_t rom;
+
+    //configuration
+    char* fwVer;
+    uint8_t fwVerProtocol;
+    //GSM
+    IscaGSMConfig_t gsmConfig;
+    //P2P
+    IscaP2PConfig_t p2pConfig;
+    //LRW
+    IscaLRWConfig_t lrwConfig;
+    //BLE
+	uint8_t blePower;
+	uint16_t bleAdvTime;
+    //TIMERS
+	IscaTimers_t timers;
 } Isca_t;
 
 #pragma pack()

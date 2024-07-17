@@ -31,11 +31,11 @@ static lmh_callback_t lora_callbacks = {BoardGetBatteryLevel, BoardGetUniqueId, 
 										lorawan_confirm_class_handler, lorawan_join_failed_handler};
 
 
-static const char *TAG = "LoRaTask";
+static const char *TAG = "loraTask";
 
 
-static LoRaElementLRWRx_t _lrwRx;
-static LoRaElementP2PRx_t _p2pRx;
+static LoRaLRWRx_t _lrwRx;
+static LoRaP2PRx_t _p2pRx;
 
 static LoRaQueueElement_t p2pQueueElement = {.type = QUEUE_SEND_P2P};
 static LoRaQueueElement_t lrwQueueElement = {.type = QUEUE_SEND_LRW};
@@ -129,7 +129,7 @@ void _eventsRXDone(bool isLRW, uint8_t *payload, uint16_t size, int16_t rssi, in
 		_p2pRx.params.snr = snr;
 
 		//post event
-		esp_event_post(APP_EVENT, APP_EVENT_P2P_RX, (void*)&_p2pRx, sizeof(LoRaElementP2PRx_t), 0);
+		esp_event_post(APP_EVENT, APP_EVENT_P2P_RX, (void*)&_p2pRx, sizeof(LoRaP2PRx_t), 0);
 		
 		//notify task
 		xTaskNotify(xTaskToNotify, LORA_BIT_P2P_RX_DONE, eSetBits);
@@ -172,7 +172,7 @@ static void lorawan_has_joined_handler(void)
 #if (OVER_THE_AIR_ACTIVATION != 0)
 	Serial.println("Network Joined");
 #else
-	Serial.println("OVER_THE_AIR_ACTIVATION != 0");
+	//Serial.println("OVER_THE_AIR_ACTIVATION != 0");
 #endif
 	lmh_class_request(CLASS_A);
 }
@@ -202,7 +202,7 @@ static void lorawanRX(lmh_app_data_t *app_data)
 	_lrwRx.params.rssi = app_data->rssi;
 	_lrwRx.params.snr = app_data->snr;
 
-	esp_event_post(APP_EVENT, APP_EVENT_LRW_RX, (void*)&_lrwRx, sizeof(LoRaElementLRWRx_t), 0);
+	esp_event_post(APP_EVENT, APP_EVENT_LRW_RX, (void*)&_lrwRx, sizeof(LoRaLRWRx_t), 0);
 
 	switch (app_data->port)
 	{
@@ -239,20 +239,20 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
 
-    if (event_base == APP_EVENT && event_id == APP_EVENT_QUEUE_P2P_SEND)
+    if (event_base == APP_EVENT && event_id == APP_EVENT_P2P_TX_REQ)
     {
-		LoRaElementP2P_t *element_p = (LoRaElementP2P_t*) event_data;
-		LoRaElementP2P_t _p2pTx;
+		LoRaP2PReq_t *element_p = (LoRaP2PReq_t*) event_data;
+		LoRaP2PReq_t _p2pTx;
 
-		memcpy(&_p2pTx, element_p, sizeof(LoRaElementP2P_t));
+		memcpy(&_p2pTx, element_p, sizeof(LoRaP2PReq_t));
 		xQueueSend(xQueueSendP2P, &_p2pTx, 0);
 		xQueueSend(xQueueLoRa, &p2pQueueElement, 0);
     }
-    if (event_base == APP_EVENT && event_id == APP_EVENT_QUEUE_LRW_SEND)
+    if (event_base == APP_EVENT && event_id == APP_EVENT_LRW_TX_REQ)
     {
-		LoRaElementLRWTx_t *element_p = (LoRaElementLRWTx_t*) event_data;
-		LoRaElementLRWTx_t _lrwTx;
-		memcpy(&_lrwTx, element_p, sizeof(LoRaElementLRWTx_t));
+		LoRaLRWTxReq_t *element_p = (LoRaLRWTxReq_t*) event_data;
+		LoRaLRWTxReq_t _lrwTx;
+		memcpy(&_lrwTx, element_p, sizeof(LoRaLRWTxReq_t));
 		xQueueSend(xQueueSendLRW, &_lrwTx, 0);
 		xQueueSend(xQueueLoRa, &lrwQueueElement, 0);
     }
@@ -266,12 +266,12 @@ void loraTask(void* param)
     
 	uint32_t ulNotifiedValue = 0;
 	const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 10000 );
-	LoRaElementP2P_t p2pElement;
-	LoRaElementLRWTx_t lrwElement;
+	LoRaP2PReq_t p2pElement;
+	LoRaLRWTxReq_t lrwElement;
 
 	xQueueLoRa = xQueueCreate( LORA_TX_QUEUE_SIZE, sizeof( LoRaQueueElement_t ) );
-	xQueueSendP2P = xQueueCreate(5, sizeof(LoRaElementP2P_t));
-	xQueueSendLRW = xQueueCreate(5, sizeof(LoRaElementLRWTx_t));
+	xQueueSendP2P = xQueueCreate(5, sizeof(LoRaP2PReq_t));
+	xQueueSendLRW = xQueueCreate(5, sizeof(LoRaLRWTxReq_t));
 	
 	xTaskToNotify = xTaskGetCurrentTaskHandle();
 
@@ -290,9 +290,9 @@ void loraTask(void* param)
 	hwConfig.USE_DIO3_TCXO = false;			  // Example uses an CircuitRocks Alora RFM1262 which uses DIO3 to control oscillator voltage
 	hwConfig.USE_DIO3_ANT_SWITCH = false;	  // Only Insight ISP4520 module uses DIO3 as antenna control
     
-	esp_event_handler_instance_register(APP_EVENT, APP_EVENT_QUEUE_P2P_SEND,
+	esp_event_handler_instance_register(APP_EVENT, APP_EVENT_P2P_TX_REQ,
 									 &app_event_handler, nullptr, nullptr);
-	esp_event_handler_instance_register(APP_EVENT, APP_EVENT_QUEUE_LRW_SEND,
+	esp_event_handler_instance_register(APP_EVENT, APP_EVENT_LRW_TX_REQ,
 									 &app_event_handler, nullptr, nullptr);
 									  
 	// Initialize LoRa chip.
@@ -303,12 +303,12 @@ void loraTask(void* param)
 	}
 
 	// Setup the EUIs and Keys
-	lmh_setDevEui(config->nodeDeviceEUI);
-	lmh_setAppEui(config->nodeAppEUI);
-	lmh_setAppKey(config->nodeAppKey);
-	lmh_setNwkSKey(config->nodeNwsKey);
-	lmh_setAppSKey(config->nodeAppsKey);
-	lmh_setDevAddr(config->nodeDevAddr);
+	lmh_setDevEui(config->rom.deviceEUI);
+	lmh_setAppEui(config->rom.appEUI);
+	lmh_setAppKey(config->rom.appKey);
+	lmh_setNwkSKey(config->rom.nwkSKey);
+	lmh_setAppSKey(config->rom.appSKey);
+	lmh_setDevAddr(config->rom.devAddr);
 
 	_events.TxDone = _eventsTXDone;
 	_events.TxTimeout = _eventsTXTimeout;
@@ -489,7 +489,7 @@ void loraTask(void* param)
 
 			case LORA_SM_P2P_TX_DONE:
 				{
-					esp_event_post(APP_EVENT, APP_EVENT_P2P_TX_DONE, (void*)&p2pElement, sizeof(LoRaElementP2P_t), 0);
+					esp_event_post(APP_EVENT, APP_EVENT_P2P_TX_RES, (void*)&p2pElement, sizeof(LoRaP2PReq_t), 0);
 					
 					if(p2pElement.params.rxDelay)
 						vTaskDelay(pdMS_TO_TICKS(p2pElement.params.rxDelay));
@@ -566,7 +566,7 @@ void loraTask(void* param)
 
 			case LORA_SM_LRW_TX_DONE:
 			{
-				LoRaElementLRWTxDone_t elementTxDone;
+				LoRaLRWTxRes_t elementTxDone;
 
 				memcpy(&elementTxDone.payload, &lrwElement.payload, sizeof(lrwElement.payload));
 				memcpy(&elementTxDone.params, &lrwElement.params, sizeof(lrwElement.params));
@@ -574,7 +574,7 @@ void loraTask(void* param)
 				elementTxDone.done.length = lorawanTXParams.PktLen;
 				elementTxDone.done.upLinkCounter = lorawanTXParams.UpLinkCounter;
 
-				esp_event_post(APP_EVENT, APP_EVENT_LRW_TX_DONE, (void*)&elementTxDone, sizeof(LoRaElementLRWTxDone_t), 0);
+				esp_event_post(APP_EVENT, APP_EVENT_LRW_TX_RES, (void*)&elementTxDone, sizeof(LoRaLRWTxRes_t), 0);
 
 				ESP_LOGI(TAG, "UpLinkCounter: %ld | Channel: %d | Lenght: %d", 
 					lorawanTXParams.UpLinkCounter, lorawanTXParams.channel, lorawanTXParams.PktLen);

@@ -38,7 +38,7 @@ static float _temperature;
 volatile bool accIntFlag = false;
 esp_timer_handle_t debounceMovingTimer, debounceStoppingTimer;
 static int64_t timeLastAccChanged, timerStopping;
-static const char* TAG = "SENSORS";
+static const char* TAG = "sensors";
 
 
 TwoWire dev_i2c(0);  

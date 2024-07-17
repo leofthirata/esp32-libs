@@ -16,14 +16,8 @@ typedef struct
     uint8_t appSKey[16];
 } OTPMemory_t;
 
-typedef union 
-{
-    OTPMemory_t asParam;
-    uint8_t asArray[sizeof(OTPMemory_t)];
-}OTPMemoryUnion_t;
-
 void otpInit(void *parameter);
-void otpRead(OTPMemoryUnion_t *memoryRead);
+void otpRead(OTPMemory_t *memoryRead);
 
 #define OTP_MEM_VER 0x01
 #endif //__OTP_HPP__

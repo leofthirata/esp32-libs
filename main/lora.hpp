@@ -80,7 +80,7 @@ typedef enum
 typedef struct {
 	uint8_t	 buffer[LORA_MAX_PAYLOAD];
 	uint16_t size;
-} LoRaPayloadStruct_t;
+} LoRaPayload_t;
 
 typedef struct 
 {
@@ -93,20 +93,20 @@ typedef struct
     uint32_t rxFreq;
     uint32_t rxDelay;
     uint32_t rxTimeout;
-} LoRaP2PParams_t;
+} LoRaP2PReqParams_t;
 
 typedef struct 
 {
     bool confirmed;
     uint8_t port;
-} LoRaLRWTxParams_t;
+} LoRaLRWTxReqParams_t;
 
 typedef struct 
 {
     uint32_t upLinkCounter;
     uint8_t channel;
     uint16_t length;
-} LoRaLRWTxDoneParams_t;
+} LoRaLRWTxResParams_t;
 
 typedef struct 
 {
@@ -124,34 +124,34 @@ typedef struct
 
 typedef struct
 {
-    LoRaPayloadStruct_t payload;
-    LoRaP2PParams_t   params;
-} LoRaElementP2P_t;
+    LoRaPayload_t payload;
+    LoRaP2PReqParams_t   params;
+} LoRaP2PReq_t;
 
 typedef struct
 {
-    LoRaPayloadStruct_t payload;
+    LoRaPayload_t payload;
     LoRaP2PRxParams_t   params;
-} LoRaElementP2PRx_t;
+} LoRaP2PRx_t;
 
 typedef struct
 {
-    LoRaPayloadStruct_t payload;
-    LoRaLRWTxParams_t   params;
-} LoRaElementLRWTx_t;
+    LoRaPayload_t payload;
+    LoRaLRWTxReqParams_t   params;
+} LoRaLRWTxReq_t;
 
 typedef struct
 {
-    LoRaPayloadStruct_t payload;
-    LoRaLRWTxParams_t   params;
-    LoRaLRWTxDoneParams_t done;
-} LoRaElementLRWTxDone_t;
+    LoRaPayload_t payload;
+    LoRaLRWTxReqParams_t   params;
+    LoRaLRWTxResParams_t done;
+} LoRaLRWTxRes_t;
 
 typedef struct
 {
-    LoRaPayloadStruct_t payload;
+    LoRaPayload_t payload;
     LoRaLRWRxParams_t   params;
-} LoRaElementLRWRx_t;
+} LoRaLRWRx_t;
 
 typedef enum
 {
@@ -167,76 +167,5 @@ typedef struct
 } LoRaQueueElement_t;
 
 void loraTask(void* param);
-uint8_t dallas_crc8(const uint8_t *pdata, const uint32_t size);
 
-#pragma pack(1)
-
- /* --------------- Command P2P --------------- */
-typedef struct
-{
-    struct
-    {
-        uint8_t sequenceNumber : 5;
-        uint8_t protocolVersion : 3;
-    } header;
-    uint8_t loraIdGw[3]; // lora id de quem vai enviar o comando
-    uint8_t packetType;  // no caso de comandos sempre 0x41
-    uint8_t crc8;
-    uint8_t loraIdReceiveCommand[3];
-    uint8_t param_desc1;
-    uint8_t param_desc2;
-    uint8_t param_desc3;
-    uint8_t param_desc4;
-    uint8_t loraEmergencyCommand;
-
-} CommandP2P_t;
-
-typedef union
-{
-    CommandP2P_t param;
-    uint8_t array[sizeof(CommandP2P_t)];
-} CommandP2PUnion_t;
-
-/* --------------- Position P2P --------------- */
-typedef struct
-{
-    struct
-    {
-        uint8_t sequenceNumber : 6;
-        uint8_t protocolVersion : 2;
-    } header;
-
-    uint8_t loraId[3];
-    uint8_t packetType; // no caso de posicoes sempre 0x50
-    uint8_t crc8;
-
-    int32_t latitude;
-    int32_t longitude;
-    struct
-    {
-        uint32_t headingGps : 9; // sugestao: usar quadrantes (8 quadrantes e 0x0 como sem gps)
-        uint32_t accelerometerStatus : 1;
-        uint32_t jammingDetectionStatus : 1;
-        uint32_t gpsStatus : 1;
-        uint32_t notused : 1;
-        uint32_t criticalBatteryStatus : 1;
-        uint32_t ignitionStatus : 1;
-        uint32_t speedValue : 7; // verificar posibilidade remover
-        uint32_t output1Status : 1;
-        uint32_t powerSupplyStatus : 1;
-        uint32_t emergencyStatus : 1;
-        uint32_t batteryVoltageInfos : 2;
-        uint32_t reservedForFutureUse : 5;
-    } flags;
-
-    uint8_t batteryVoltage;
-} PositionP2P_t;
-
-typedef union
-{
-    PositionP2P_t param;
-    uint8_t array[sizeof(PositionP2P_t)];
-} PositionP2PUnion_t;
-
-#pragma pack()
 #endif //__LORA_HPP__

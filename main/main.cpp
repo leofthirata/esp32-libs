@@ -1,5 +1,5 @@
 #include "main.h"
-#include "sdkconfig.h"
+
 #include "esp_mac.h"
 #include "Button.h"
 
@@ -10,10 +10,11 @@
 #include "esp_console.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "Storage/storage.hpp"
 #include "cmd_system.h"
 
 #include "stateMachine.hpp"
-#include "modem.hpp"
+#include "gsm.hpp"
 #include "esp_netif.h"
 #include "esp_event.h"
 #include <esp_sleep.h>
@@ -21,13 +22,15 @@
 
 #include "otp.hpp"
 #include "esp_log.h"
+
+Storage::Storage *storage = nullptr;
 uint8_t mac[6];
 static const char* TAG = "main.cpp";
 
 using namespace BiColorStatus;
  
 Isca_t config;
-static OTPMemoryUnion_t readMemory;
+static OTPMemory_t readMemory;
 
 void print_reset_reason(RESET_REASON reason)
 {
@@ -98,12 +101,12 @@ static void initialize_nvs(void)
 
 void setup()
 {
-    esp_console_repl_t *repl = NULL;
-    esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+    // esp_console_repl_t *repl = NULL;
+    // esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     initialize_nvs();
-    register_system_common();
-    esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_console_new_repl_uart(&hw_config, &repl_config, &repl));
+    // register_system_common();
+    // esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+    // ESP_ERROR_CHECK(esp_console_new_repl_uart(&hw_config, &repl_config, &repl));
     
     Serial.begin(115200);
     
@@ -116,52 +119,55 @@ void setup()
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
    
-    repl_config.prompt = PROMPT_STR ">";
-    repl_config.max_cmdline_length = 1024;
-    
+    // repl_config.prompt = PROMPT_STR ">";
+    // repl_config.max_cmdline_length = 1024;
+
+    storage = new Storage::Storage();
+    ESP_ERROR_CHECK(storage->init());
+
     otpInit(NULL);
     otpRead(&readMemory);
 
     memset(&config, 0, sizeof(config));
-    config.loraId = (readMemory.asParam.loraID[0]<<16) + (readMemory.asParam.loraID[1]<<8) + (readMemory.asParam.loraID[2]);
-    memcpy(config.nodeDeviceEUI, readMemory.asParam.devEUI, 8);
-    memcpy(config.nodeAppEUI, readMemory.asParam.appEUI, 8);
-    config.nodeDevAddr = (readMemory.asParam.devAddr[0]<<24) + (readMemory.asParam.devAddr[1]<<16) +
-        (readMemory.asParam.devAddr[2]<<8) + readMemory.asParam.devAddr[3];
-    memcpy(config.nodeNwsKey, readMemory.asParam.nwSKey, 16);
-    memcpy(config.nodeAppsKey, readMemory.asParam.appSKey, 16);
+    config.rom.loraId = (readMemory.loraID[0]<<16) + (readMemory.loraID[1]<<8) + (readMemory.loraID[2]);
+    memcpy(config.rom.deviceEUI, readMemory.devEUI, 8);
+    memcpy(config.rom.appEUI, readMemory.appEUI, 8);
+    config.rom.devAddr = (readMemory.devAddr[0]<<24) + (readMemory.devAddr[1]<<16) +
+        (readMemory.devAddr[2]<<8) + readMemory.devAddr[3];
+    memcpy(config.rom.nwkSKey, readMemory.nwSKey, 16);
+    memcpy(config.rom.appSKey, readMemory.appSKey, 16);
     
-    printf("loraID: %ld | devAddress: %08lX\r\n", config.loraId,config.nodeDevAddr);
-    ESP_LOG_BUFFER_HEX("deviceEUI", config.nodeDeviceEUI, sizeof(config.nodeDeviceEUI));
-    ESP_LOG_BUFFER_HEX("appEUI", config.nodeAppEUI, sizeof(config.nodeAppEUI));
-    ESP_LOG_BUFFER_HEX("nwSKey", config.nodeNwsKey, sizeof(config.nodeNwsKey));
-    ESP_LOG_BUFFER_HEX("appSKey", config.nodeAppsKey, sizeof(config.nodeAppsKey));
+    printf("loraID: %ld | devAddress: %08lX\r\n", config.rom.loraId,config.rom.devAddr);
+    ESP_LOG_BUFFER_HEX("deviceEUI", config.rom.deviceEUI, sizeof(config.rom.deviceEUI));
+    ESP_LOG_BUFFER_HEX("appEUI", config.rom.appEUI, sizeof(config.rom.appEUI));
+    ESP_LOG_BUFFER_HEX("nwSKey", config.rom.nwkSKey, sizeof(config.rom.nwkSKey));
+    ESP_LOG_BUFFER_HEX("appSKey", config.rom.appSKey, sizeof(config.rom.appSKey));
 
-    config.p2pSF = P2P_SPREADING_FACTOR;
-    config.p2pBW = P2P_BANDWIDTH;
-    config.p2pCR = 1;
-    config.p2pTXFreq = P2P_POS_FREQ;
-    config.p2pTxPower = P2P_TX_POWER;
-    config.p2pRxFreq = P2P_CMD_FREQ;
-    config.p2pRxDelay = 0;
-    config.p2pRxTimeout = P2P_RX_TIMEOUT;
-    config.p2pTxTimeout = P2P_TX_TIMEOUT;
+    config.p2pConfig.sf = P2P_SPREADING_FACTOR;
+    config.p2pConfig.bw = P2P_BANDWIDTH;
+    config.p2pConfig.cr = 1;
+    config.p2pConfig.txFreq = P2P_POS_FREQ;
+    config.p2pConfig.txPower = P2P_TX_POWER;
+    config.p2pConfig.rxFreq = P2P_CMD_FREQ;
+    config.p2pConfig.rxDelay = 0;
+    config.p2pConfig.rxTimeout = P2P_RX_TIMEOUT;
+    config.p2pConfig.txTimeout = P2P_TX_TIMEOUT;
 
-    config.lrwConfirmed = false;
-    config.lrwPosPort = LRW_POS_PORT;
-    config.lrwCmdPort = LRW_CMD_PORT;
-    config.lrwStaPort = LRW_STATUS_PORT;
-    config.lrwADR = false;
+    config.lrwConfig.confirmed = false;
+    config.lrwConfig.posPort = LRW_POS_PORT;
+    config.lrwConfig.cmdPort = LRW_CMD_PORT;
+    config.lrwConfig.statusPort = LRW_STATUS_PORT;
+    config.lrwConfig.adr = false;
 
     ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
     ESP_ERROR_CHECK(esp_base_mac_addr_set(mac));
     ESP_LOGW(TAG, "MAC: " MACSTR " ", MAC2STR(mac));
 
-    memcpy(&config.bleMac, mac, sizeof(config.bleMac));
+    memcpy(&config.rom.bleMac, mac, sizeof(config.rom.bleMac));
 
-    memcpy(&config.apn, GSM_APN, strlen(GSM_APN));
-    memcpy(&config.gsmServer, GSM_SERVER, strlen(GSM_SERVER));
-    config.gsmPort = GSM_PORT;
+    memcpy(&config.gsmConfig.apn, GSM_APN, strlen(GSM_APN));
+    memcpy(&config.gsmConfig.server, GSM_SERVER, strlen(GSM_SERVER));
+    config.gsmConfig.port = GSM_PORT;
 
     button_init_t button = {
         .buttonEventHandler = button_handler,
@@ -177,10 +183,10 @@ void setup()
 
     // Low priority numbers denote low priority tasks. The idle task has priority zero (tskIDLE_PRIORITY). 
     xTaskCreatePinnedToCore(sensorsTask, "sensorsTask", 4096, (void*) &config, 5, NULL, 0);
-    xTaskCreatePinnedToCore(loraTask, "loraTask", 4096, (void*) &config, 5, NULL, 0);
+    //xTaskCreatePinnedToCore(loraTask, "loraTask", 4096, (void*) &config, 5, NULL, 0);
     xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &config, 6, NULL, 0);
-    xTaskCreate(modem_task_function, "modem_tsk", 8192, (void*) &config, uxTaskPriorityGet(NULL), NULL);
-    ESP_ERROR_CHECK(esp_console_start_repl(repl));
+    xTaskCreate(gsmTask, "gsmTask", 8192, (void*) &config, uxTaskPriorityGet(NULL), NULL);
+    // ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
 
 
