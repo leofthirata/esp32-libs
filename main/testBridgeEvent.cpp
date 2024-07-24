@@ -35,14 +35,15 @@ typedef struct
     unsigned long lastNegativePulseStartTime;
 } R800CNetlight_t;
 
-static const char *TAG = "main";
 static esp_timer_handle_t netlightTimer;
 static QueueHandle_t xQueueR800CNetlight;
 
 void power_on_modem()
 {
     printf("Power on the modem\r\n");
+    gpio_set_level(GPIO_OUTPUT_POWER_ON, true);
     gpio_set_level(GPIO_NUM_25, true);
+    vTaskDelay(pdMS_TO_TICKS(500));
     gpio_set_level(GPIO_OUTPUT_PWRKEY, 1);
     vTaskDelay(pdMS_TO_TICKS(2000));
     gpio_set_level(GPIO_OUTPUT_PWRKEY, 0);
@@ -77,30 +78,31 @@ const char* printR800CNetlightStatus(NetlightStatus_t status)
     return "ERROR";
 }
 
-static void IRAM_ATTR calcPulsewidth()
+static void IRAM_ATTR netlightISR()
 {
     static unsigned long positivePulseStartTime = 0, negativePulseStartTime = 0;
     static NetlightStatus_t state = UNKNOWN, prev_state = UNKNOWN;
-    BaseType_t xHigherPriorityTaskWoken;
     R800CNetlight_t m_R800CNetlight;
     
     static int64_t lastReport = 0;
     int64_t now = micros();
-
-    /* We have not woken a task at the start of the ISR. */
-    xHigherPriorityTaskWoken = pdFALSE;
 
     if (gpio_get_level((gpio_num_t)PIN_NETLIGHT) == HIGH) // If the change was a RISING edge
     {
         positivePulseStartTime = now; // Store the start time (in microseconds)
         if((now - m_R800CNetlight.lastNegativePulseStartTime) < NETLIGHT_OFF_TIMEOUT)
             m_R800CNetlight.negativePulseWidth = (now - negativePulseStartTime) / 1000; // pulse in ms
+        else
+            m_R800CNetlight.negativePulseWidth = 0;
     }
     else // If the change was a FALLING edge
     {
         negativePulseStartTime = now;
-        if ((now - m_R800CNetlight.positivePulseWidth) < NETLIGHT_OFF_TIMEOUT)
+        if ((now - m_R800CNetlight.lastNegativePulseStartTime) < NETLIGHT_OFF_TIMEOUT)
             m_R800CNetlight.positivePulseWidth = (now - positivePulseStartTime) / 1000; // pulse in ms
+        else
+            m_R800CNetlight.positivePulseWidth = 0;
+
         m_R800CNetlight.lastNegativePulseStartTime = now;
 
         if(esp_timer_is_active(netlightTimer))
@@ -109,8 +111,9 @@ static void IRAM_ATTR calcPulsewidth()
         }
         esp_timer_start_once(netlightTimer, NETLIGHT_OFF_TIMEOUT);
     }
-
-    if (m_R800CNetlight.positivePulseWidth > 0)
+    
+    //64 - 10%
+    if (m_R800CNetlight.positivePulseWidth > 58) 
     {
         // 300ms +- 10%
         if (m_R800CNetlight.negativePulseWidth < 330 && m_R800CNetlight.negativePulseWidth > 270)
@@ -124,11 +127,6 @@ static void IRAM_ATTR calcPulsewidth()
         else if (m_R800CNetlight.negativePulseWidth < 3300 && m_R800CNetlight.negativePulseWidth > 2700)
             state = REGISTERED;
     }
-    // else
-    // {
-    //     state = OFF;
-    //     m_R800CNetlight.negativePulseWidth = 0;
-    // }
 
     if (state != prev_state)
     {
@@ -160,8 +158,6 @@ static void netlightTimerCallback(void *arg)
 
 void statusTask(void *pvParameters)
 {
-    int16_t count = 0;
-    int64_t now = 0;
     R800CNetlight_t qElementNetlight;
     
     const esp_timer_create_args_t netlightTimerArgs = {
@@ -179,7 +175,7 @@ void statusTask(void *pvParameters)
 
     gpio_config(&io_conf); // configure GPIO with the given settings
 
-    gpio_set_level(GPIO_OUTPUT_POWER_ON, true);
+    gpio_set_level(GPIO_OUTPUT_POWER_ON, false);
     gpio_set_level(GPIO_OUTPUT_PWRKEY, false);
     gpio_set_level(GPIO_NUM_25, false);
 
@@ -191,7 +187,7 @@ void statusTask(void *pvParameters)
     }
 
     pinMode(PIN_NETLIGHT, INPUT);                                                 // Set the input pin
-    attachInterrupt(digitalPinToInterrupt(PIN_NETLIGHT), calcPulsewidth, CHANGE); // Run the calcPulsewidth function on signal CHANGE
+    attachInterrupt(digitalPinToInterrupt(PIN_NETLIGHT), netlightISR, CHANGE); // Run the calcPulsewidth function on signal CHANGE
 
     if(digitalRead(PIN_NETLIGHT) == 0)
     {
@@ -210,26 +206,31 @@ void statusTask(void *pvParameters)
         }
     }
 }
+void power_off_modem()
+{
+    printf("\t\t\t Power off modem!\r\n");
+    gpio_set_level(GPIO_OUTPUT_POWER_ON, false);
+}
 
 void button_handler(button_queue_t param)
 {
     switch (param.buttonState)
     {
     case BTN_PRESSED:
-        ESP_LOGD("BTN", "pressed");
-        power_on_modem();
-        break;
+        printf("\t\t\t buttom pressed\r\n");
+    break;
 
     case BTN_RELEASED:
 
         if (param.buttonPrev == BTN_PRESSED)
-        {
-        }
-        break;
+            power_on_modem();
+        else
+            power_off_modem();
+    break;
 
     case BTN_HOLD:
-        ESP_LOGI("BTN", "hold");
-        break;
+        printf("\t\t\t buttom hold\r\n");
+    break;
     }
 }
 
@@ -250,8 +251,6 @@ void setup()
     xTaskCreatePinnedToCore(statusTask, "statusTask", 4096, NULL, 5, NULL, 0);
 }
 
-// --------------------------------------------------
-// --------------------------------------------------
 void loop()
 {
     if (Serial.available())
