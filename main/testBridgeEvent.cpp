@@ -16,6 +16,7 @@
 #define PIN_NETLIGHT 37
 
 #define NETLIGHT_REPORT_TIMEOUT 60000000 //us
+#define NETLIGHT_OFF_TIMEOUT    3300000 //us
 
 typedef enum
 {
@@ -79,7 +80,7 @@ const char* printR800CNetlightStatus(NetlightStatus_t status)
 static void IRAM_ATTR calcPulsewidth()
 {
     static unsigned long positivePulseStartTime = 0, negativePulseStartTime = 0;
-    static NetlightStatus_t state = OFF, prev_state = UNKNOWN;
+    static NetlightStatus_t state = UNKNOWN, prev_state = UNKNOWN;
     BaseType_t xHigherPriorityTaskWoken;
     R800CNetlight_t m_R800CNetlight;
     
@@ -92,19 +93,21 @@ static void IRAM_ATTR calcPulsewidth()
     if (gpio_get_level((gpio_num_t)PIN_NETLIGHT) == HIGH) // If the change was a RISING edge
     {
         positivePulseStartTime = now; // Store the start time (in microseconds)
-        m_R800CNetlight.negativePulseWidth = (now - negativePulseStartTime) / 1000; // pulse in ms
+        if((now - m_R800CNetlight.lastNegativePulseStartTime) < NETLIGHT_OFF_TIMEOUT)
+            m_R800CNetlight.negativePulseWidth = (now - negativePulseStartTime) / 1000; // pulse in ms
     }
     else // If the change was a FALLING edge
     {
-        m_R800CNetlight.positivePulseWidth = (now - positivePulseStartTime) / 1000; // pulse in ms
         negativePulseStartTime = now;
+        if ((now - m_R800CNetlight.positivePulseWidth) < NETLIGHT_OFF_TIMEOUT)
+            m_R800CNetlight.positivePulseWidth = (now - positivePulseStartTime) / 1000; // pulse in ms
         m_R800CNetlight.lastNegativePulseStartTime = now;
 
         if(esp_timer_is_active(netlightTimer))
         {
             esp_timer_stop(netlightTimer);
         }
-        esp_timer_start_once(netlightTimer, 3300000);
+        esp_timer_start_once(netlightTimer, NETLIGHT_OFF_TIMEOUT);
     }
 
     if (m_R800CNetlight.positivePulseWidth > 0)
@@ -121,11 +124,11 @@ static void IRAM_ATTR calcPulsewidth()
         else if (m_R800CNetlight.negativePulseWidth < 3300 && m_R800CNetlight.negativePulseWidth > 2700)
             state = REGISTERED;
     }
-    else
-    {
-        state = OFF;
-        m_R800CNetlight.negativePulseWidth = 0;
-    }
+    // else
+    // {
+    //     state = OFF;
+    //     m_R800CNetlight.negativePulseWidth = 0;
+    // }
 
     if (state != prev_state)
     {
@@ -192,7 +195,7 @@ void statusTask(void *pvParameters)
 
     if(digitalRead(PIN_NETLIGHT) == 0)
     {
-        esp_timer_start_once(netlightTimer, 3300000);
+        esp_timer_start_once(netlightTimer, NETLIGHT_OFF_TIMEOUT);
     }
     
     power_on_modem();
