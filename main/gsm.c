@@ -7,8 +7,9 @@
 #include "string.h"
 #include "sys/time.h"
 #include "stateMachine.hpp"
-#include "gsm.hpp"
+#include "gsm.h"
 #include "mbedtls/base64.h"
+#include "memory.h"
 
 static const char *TAG = "gsmTask";
 
@@ -19,8 +20,10 @@ static const char *TAG = "gsmTask";
 #define GPIO_OUTPUT_POWER_ON ((gpio_num_t)GPIO_NUM_13)
 #define GPIO_OUTPUT_RST ((gpio_num_t)GPIO_NUM_NC)
 
-static GSMTxReq_t gsmTx;
-static GSMTxRes_t txDone;
+static GSMTxReq_t gsmTxReq;
+static GSMTxRes_t gsmTxRes;
+static GSMRx_t gsmRx;
+
 static Isca_t *m_config;
 
 typedef enum
@@ -47,65 +50,7 @@ typedef struct
     uint8_t csq;
 } task_data_t;
 
-typedef struct
-{
-    int cell;   // 0 The serving cell, 1-6 The index of the neighboring cell
-    int bcch;   // ARFCN(Absolute radio frequency channel number) of BCCH carrier, in decimal format
-    int rxl;    // Receive level, in decimal format
-    int rxq;    // Receive quality, in decimal format
-    int mcc;    // Mobile country code, in decimal format
-    int mnc;    // Mobile network code, in decimal format
-    int bsic;   // Base station identity code, in decimal format
-    int cellid; // Cell id, in hexadecimal format
-    int rla;    // Receive level access minimum, in decimal format
-    int txp;    // Transmit power maximum CCCH, in decimal format
-    int lac;    // Location area code, in hexadecimal format
-    int ta;     // Timing Advance, in decimal format
-    int dbm;    // Receiving level in dBm
-    int c1;     // C1 value
-    int c2;     // C2 value
-} mdm_lbs_cell_t;
-
 struct tm tm;
-
-const char *printError(esp_err_t ret)
-{
-    switch (ret)
-    {
-    case ESP_OK:
-        return "ESP_OK";
-    case ESP_FAIL:
-        return "ESP_FAIL";
-    case ESP_ERR_NO_MEM:
-        return "ESP_ERR_NO_MEM";
-    case ESP_ERR_INVALID_ARG:
-        return "ESP_ERR_INVALID_ARG";
-    case ESP_ERR_INVALID_STATE:
-        return "ESP_ERR_INVALID_STATE";
-    case ESP_ERR_INVALID_SIZE:
-        return "ESP_ERR_INVALID_SIZE";
-    case ESP_ERR_NOT_FOUND:
-        return "ESP_ERR_NOT_FOUND";
-    case ESP_ERR_NOT_SUPPORTED:
-        return "ESP_ERR_NOT_SUPPORTED";
-    case ESP_ERR_TIMEOUT:
-        return "ESP_ERR_TIMEOUT";
-    case ESP_ERR_INVALID_RESPONSE:
-        return "ESP_ERR_INVALID_RESPONSE";
-    case ESP_ERR_INVALID_CRC:
-        return "ESP_ERR_INVALID_CRC";
-    case ESP_ERR_INVALID_VERSION:
-        return "ESP_ERR_INVALID_VERSION";
-    case ESP_ERR_INVALID_MAC:
-        return "ESP_ERR_INVALID_MAC";
-    case ESP_ERR_NOT_FINISHED:
-        return "ESP_ERR_NOT_FINISHED";
-    case ESP_ERR_NOT_ALLOWED:
-        return "ESP_ERR_NOT_ALLOWED";
-    default:
-        return "UNKNOWN_ESP_ERR";
-    }
-}
 
 QueueHandle_t _internal_queue;
 
@@ -124,7 +69,7 @@ void power_off_modem(esp_modem_dce_t *dce)
 {
     char _response[512] = {};
     esp_err_t ret = esp_modem_at(dce, "AT+CPOWD=1", _response,1500);
-    ESP_LOGI(TAG, "Power off the modem | [%d] %s | %s", ret, printError(ret), _response);
+    ESP_LOGI(TAG, "Power off the modem | [%d] %s | %s", ret, esp_err_to_name(ret), _response);
 }
 
 void config_pwrkey_gpio(void)
@@ -162,7 +107,7 @@ uint8_t crc8_itu(uint8_t *data, uint16_t length)
     return crc ^ 0x55;
 }
 
-char *generate_position_hex(mdm_lbs_cell_t *cells, GSMTxReq_t *_data, uint8_t *size)
+char *generate_position_hex(mdm_lbs_cell_t *cells, GSMTxPayload_t *_data, size_t *size)
 {
     char *hexArray = NULL;
     uint8_t numberErbs = 0;
@@ -174,17 +119,17 @@ char *generate_position_hex(mdm_lbs_cell_t *cells, GSMTxReq_t *_data, uint8_t *s
             numberErbs++;
         }
     }
-    uint16_t positionHexSize = sizeof(GSMTxReq_t) + numberErbs * sizeof(GSMERBPacket_t);
+    uint16_t positionHexSize = sizeof(GSMTxPayload_t) + numberErbs * sizeof(GSMERBPacket_t);
     hexArray = calloc(positionHexSize, sizeof(uint8_t));
     *size = positionHexSize;
     _data->n_erbs = numberErbs;
-    memcpy(hexArray, _data, sizeof(GSMTxReq_t));
+    memcpy(hexArray, _data, sizeof(GSMTxPayload_t));
 
     for (int i = 0; i < 7; i++)
     {
         if (cells[i].bcch != 0)
         {
-            uint16_t _index = sizeof(GSMTxReq_t) + i * sizeof(GSMERBPacket_t);
+            uint16_t _index = sizeof(GSMTxPayload_t) + i * sizeof(GSMERBPacket_t);
             GSMERBPacket_t *erbPacket_p = (GSMERBPacket_t *)(hexArray + _index);
             erbPacket_p->id[0] = 0x00; //(cells[i].cellid>>(4*8)) * 0xff;
             erbPacket_p->id[1] = (cells[i].cellid >> (3 * 8)) * 0xff;
@@ -206,7 +151,7 @@ char *generate_position_hex(mdm_lbs_cell_t *cells, GSMTxReq_t *_data, uint8_t *s
     }
 
     uint8_t crc_calc = crc8_itu((uint8_t *)hexArray, positionHexSize);
-    GSMTxReq_t *element_p = (GSMTxReq_t *)hexArray;
+    GSMTxPayload_t *element_p = (GSMTxPayload_t *)hexArray;
     element_p->crc = crc_calc;
 
     return hexArray;
@@ -218,8 +163,8 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == APP_EVENT && event_id == APP_EVENT_GSM_TX_REQ)
     {
         GSMTxReq_t *element_p = (GSMTxReq_t *)event_data;
-        memcpy(&gsmTx, element_p, sizeof(GSMTxReq_t));
-        xQueueSend(_internal_queue, &gsmTx, 0);
+        memcpy(&gsmTxReq, element_p, sizeof(GSMTxReq_t));
+        xQueueSend(_internal_queue, &gsmTxReq, 0);
     }
 }
 
@@ -271,7 +216,7 @@ const char *printState(en_task_state state)
 
 void gsmTask(void *pvParameters)
 {
-    esp_err_t err, err2Send = ESP_FAIL;
+    esp_err_t err = ESP_FAIL, err2Send = ESP_FAIL;
     en_task_state state, prev_state;
     task_data_t task_data = {};
 
@@ -290,7 +235,7 @@ void gsmTask(void *pvParameters)
     dte_config.uart_config.rx_io_num = RXD_PIN;
     dte_config.uart_config.rts_io_num = -1;
     dte_config.uart_config.cts_io_num = -1;
-    esp_modem_dce_config_t dce_config = ESP_MODEM_DCE_DEFAULT_CONFIG(m_config->gsmConfig.apn);
+    esp_modem_dce_config_t dce_config = ESP_MODEM_DCE_DEFAULT_CONFIG(m_config->config.gsm.apn);
     esp_netif_config_t netif_ppp_config = ESP_NETIF_DEFAULT_PPP();
     esp_netif_t *esp_netif = esp_netif_new(&netif_ppp_config);
     assert(esp_netif);
@@ -314,7 +259,7 @@ void gsmTask(void *pvParameters)
 
             if (_ret != ESP_OK)
             {
-                ESP_LOGE(TAG, "Error PowerOn: [%d] %s | Trying again! in 3s", _ret, printError(_ret));
+                ESP_LOGE(TAG, "Error PowerOn: [%d] %s | Trying again! in 3s", _ret, esp_err_to_name(_ret));
                 vTaskDelay(pdMS_TO_TICKS(3000));
                 count++;
             }
@@ -347,7 +292,7 @@ void gsmTask(void *pvParameters)
                 }
                 else
                 {
-                    ESP_LOGE(TAG, "Error get imei: [%d] %s | Trying again! in 3s", _ret, printError(_ret));
+                    ESP_LOGE(TAG, "Error get imei: [%d] %s | Trying again! in 3s", _ret, esp_err_to_name(_ret));
                     vTaskDelay(pdMS_TO_TICKS(3000));
                     count++;
                 }
@@ -420,6 +365,7 @@ void gsmTask(void *pvParameters)
 
         case STATE_SLEEP:
         {
+            memset(cells, 0, sizeof(cells));
             power_off_modem(dce);
             prev_state = state;
             state = STATE_WAIT_EVENT;
@@ -457,13 +403,13 @@ void gsmTask(void *pvParameters)
                 if (count++ < 4)
                 {
                     state = STATE_POWERON;
-                    ESP_LOGE(TAG, "Error PowerOn: [%d] %s | Trying again! in 3s", _ret, printError(_ret));
+                    ESP_LOGE(TAG, "Error PowerOn: [%d] %s | Trying again! in 3s", _ret, esp_err_to_name(_ret));
                     vTaskDelay(pdMS_TO_TICKS(3000));
                 }
                 else
                 {
                     count = 0;
-                    ESP_LOGW(TAG, "Error PowerOn: [%d] %s | Going to sleep", _ret, printError(_ret));
+                    ESP_LOGW(TAG, "Error PowerOn: [%d] %s | Going to sleep", _ret, esp_err_to_name(_ret));
                     err2Send = _ret;
                     state = STATE_REPORT_ERROR;
                 }
@@ -511,7 +457,7 @@ void gsmTask(void *pvParameters)
                 }
                 else
                 {
-                    ESP_LOGW(TAG, "Error STATE_SYNC [%d]%s | Trying again in 1s", ret, printError(ret));
+                    ESP_LOGW(TAG, "Error STATE_SYNC [%d]%s | Trying again in 1s", ret, esp_err_to_name(ret));
                     vTaskDelay(pdMS_TO_TICKS(1000));
                 }
             }
@@ -593,14 +539,14 @@ void gsmTask(void *pvParameters)
             const char delimiter[] = "\r\n+CENG: ";
             char *token;
             int cell_i = -1;
-            char _response[512]={};
-            memset(_response, 0, sizeof(_response));
-            if (esp_modem_at_raw(dce, "AT+CENG?\r", _response, "OK", "ERROR", 5000) == ESP_OK)
+            memset(cells, 0, sizeof(cells));
+
+            if (esp_modem_at_raw(dce, "AT+CENG?\r", response, "OK", "ERROR", 5000) == ESP_OK)
             {
-                ESP_LOGI(TAG, "AT+CENG? response: %s", _response);
+                ESP_LOGI(TAG, "AT+CENG? response: %s", response);
 
                 /* get the first token */
-                token = strtok(_response, delimiter);
+                token = strtok(response, delimiter);
 
                 /* walk through other tokens */
                 while (token != NULL && cell_i < 7)
@@ -691,11 +637,11 @@ void gsmTask(void *pvParameters)
             esp_err_t ret = ESP_OK;
             sprintf(command, "AT+CIPRXGET=1\r\n");
             ret = esp_modem_at_raw(dce, command, response, "OK", "ERROR", 1000);
-            ESP_LOGI(TAG, "AT+CIPRXGET=1 ret [%d]%s | response: %s", ret, printError(ret), response);
+            ESP_LOGI(TAG, "AT+CIPRXGET=1 ret [%d]%s | response: %s", ret, esp_err_to_name(ret), response);
 
-            sprintf(command, "AT+CSTT=\"%s\"\r\n", gsmElement.apn);
+            sprintf(command, "AT+CSTT=\"%s\"\r\n", gsmElement.config.apn);
             ret = esp_modem_at_raw(dce, command, response, "OK", "ERROR", 1000);
-            ESP_LOGI(TAG, "AT+CSTT ret [%d]%s | response: %s", ret, printError(ret), response);
+            ESP_LOGI(TAG, "AT+CSTT ret [%d]%s | response: %s", ret, esp_err_to_name(ret), response);
             
             //+PDP: DEACT => 2B5044503A204445414354
             const char deactString[]={0x2b, 0x50, 0x44, 0x50, 0x3a, 0x20, 0x44, 0x45, 0x41, 0x43, 0x54, 0x00};
@@ -704,8 +650,8 @@ void gsmTask(void *pvParameters)
 
             // bring ip up
             sprintf(command, "AT+CIICR\r\n");
-            ret = esp_modem_at_raw(dce, command, response, "OK", "ERROR",90000);
-            ESP_LOGI(TAG, "AT+CIICR ret [%d]%s | response: %s", ret, printError(ret), response);
+            ret = esp_modem_at_raw(dce, command, response, "OK", "ERROR",30000);
+            ESP_LOGI(TAG, "AT+CIICR ret [%d]%s | response: %s", ret, esp_err_to_name(ret), response);
             
             //get cases of +PDP: DEACT
            _token = strstr(response, deactString);
@@ -714,18 +660,36 @@ void gsmTask(void *pvParameters)
                 // If "+PDP: DEACT" URC is reported which means the GPRS is released by the network, 
                 // then user still needs to execute "AT+CIPSHUT" command to make PDP context come back to original state
                 ESP_LOGW(TAG, "\t\tGOT <+PDP: DEACT> ");
-                sprintf(command, "AT+CIPSHUT");
-                esp_err_t err = esp_modem_at(dce, command, response, 5000);
-                ESP_LOGI(TAG, "\t\t[AT+CIPSHUT] response: %s | err [%d] %s | Trying again in 3s",response, err,printError(err));
-                vTaskDelay(pdMS_TO_TICKS(3000));
-                if(count++ < 4)
-                    state = STATE_OPEN_SOCKET;
+                sprintf(command, "AT+CIPSHUT\r");
+                esp_err_t err = ESP_OK;
+                uint8_t numTries = 4;
+                do
+                {
+                    err = esp_modem_at_raw(dce, command, response, "SHUT OK", "ERROR", 5000);
+                    ESP_LOGI(TAG, "\t\t[AT+CIPSHUT] response: %s | err [%d] %s ",response, err,esp_err_to_name(err));
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                } while (numTries-- > 0 && err != ESP_OK);
+                
+                if (numTries == 0)
+                {
+                    ESP_LOGE(TAG, "GOT <+PDP: DEACT> and failed to connect.");
+                    err2Send = err;
+                    state = STATE_REPORT_ERROR;
+                }
                 else
                 {
-                    count = 0;
-                    ESP_LOGE(TAG, "GOT <+PDP: DEACT> and failed to connect.");
-                    err2Send = ESP_FAIL;
-                    state = STATE_REPORT_ERROR;
+                    ESP_LOGI(TAG, "\t\t[AT+CIPSHUT] response: %s | err [%d] %s | Trying to open socket again in 3s",response, err,esp_err_to_name(err));
+                    vTaskDelay(pdMS_TO_TICKS(3000));
+                    if(count++ < 4)
+                        state = STATE_OPEN_SOCKET;
+                    else
+                    {
+                        count = 0;
+                        ESP_LOGE(TAG, "GOT <+PDP: DEACT> and failed to connect.");
+                        err2Send = ESP_FAIL;
+                        state = STATE_REPORT_ERROR;
+                    }
+
                 }
             }
             else
@@ -735,7 +699,7 @@ void gsmTask(void *pvParameters)
                 // show ip
                 sprintf(command, "AT+CIFSR\r\n");
                 ret = esp_modem_at(dce, command, response, 1000);
-                ESP_LOGI(TAG, "AT+CIFSR ret [%d]%s | response: %s", ret, printError(ret), response);
+                ESP_LOGI(TAG, "AT+CIFSR ret [%d]%s | response: %s", ret, esp_err_to_name(ret), response);
 
                 //get cases of +PDP: DEACT
                 _token = strstr(response, deactString);
@@ -746,7 +710,7 @@ void gsmTask(void *pvParameters)
                     ESP_LOGW(TAG, "\t\tGOT <+PDP: DEACT> | token: %s", _token);
                     sprintf(command, "AT+CIPSHUT");
                     esp_err_t err = esp_modem_at(dce, command, response, 5000);
-                    ESP_LOGI(TAG, "\t\t[AT+CIPSHUT] response: %s | err [%d] %s | Trying again in 3s",response, err,printError(err));
+                    ESP_LOGI(TAG, "\t\t[AT+CIPSHUT] response: %s | err [%d] %s | Trying again in 3s",response, err,esp_err_to_name(err));
                     vTaskDelay(pdMS_TO_TICKS(3000));
                     if(count++ < 4)
                         state = STATE_OPEN_SOCKET;
@@ -762,10 +726,18 @@ void gsmTask(void *pvParameters)
                 {
                     // start socket with server
                     count = 0;
-                    sprintf(command, "AT+CIPSTART=\"TCP\",\"%s\",\"%d\"\r\n", gsmElement.server, gsmElement.port);
-                    ret = esp_modem_at_raw(dce, command, response, "CONNECT OK", "ERROR", 5000);
-                    ESP_LOGI(TAG, "AT+CIPSTART ret [%d]%s | response: %s", ret, printError(ret), response);
-                    state = STATE_SEND_PACKET;
+                    sprintf(command, "AT+CIPSTART=\"TCP\",\"%s\",\"%d\"\r\n", gsmElement.config.server, gsmElement.config.port);
+                    ret = esp_modem_at_raw(dce, command, response, "CONNECT OK", "CONNECT FAIL", 5000);
+                    ESP_LOGI(TAG, "AT+CIPSTART ret [%d]%s | response: %s", ret, esp_err_to_name(ret), response);
+                    if(ret == ESP_OK)
+                        state = STATE_SEND_PACKET;
+                    else
+                    {
+                        sprintf(command, "AT+CIPSHUT");
+                        esp_modem_at(dce, command, response, 5000);
+                        err2Send = ret;
+                        state = STATE_REPORT_ERROR;
+                    }
                 }
             }
 
@@ -775,69 +747,64 @@ void gsmTask(void *pvParameters)
         case STATE_SEND_PACKET:
         {
             uint64_t _imei = strtoll(task_data.imei, NULL, 10);
-            gsmElement.imei[0] = (_imei >> (6 * 8)) & 0xFF;
-            gsmElement.imei[1] = (_imei >> (5 * 8)) & 0xFF;
-            gsmElement.imei[2] = (_imei >> (4 * 8)) & 0xFF;
-            gsmElement.imei[3] = (_imei >> (3 * 8)) & 0xFF;
-            gsmElement.imei[4] = (_imei >> (2 * 8)) & 0xFF;
-            gsmElement.imei[5] = (_imei >> (1 * 8)) & 0xFF;
-            gsmElement.imei[6] = (_imei) & 0xFF;
-            uint8_t size;
-            char *hex = generate_position_hex(cells, &gsmElement, &size);
+            gsmElement.payload.imei[0] = (_imei >> (6 * 8)) & 0xFF;
+            gsmElement.payload.imei[1] = (_imei >> (5 * 8)) & 0xFF;
+            gsmElement.payload.imei[2] = (_imei >> (4 * 8)) & 0xFF;
+            gsmElement.payload.imei[3] = (_imei >> (3 * 8)) & 0xFF;
+            gsmElement.payload.imei[4] = (_imei >> (2 * 8)) & 0xFF;
+            gsmElement.payload.imei[5] = (_imei >> (1 * 8)) & 0xFF;
+            gsmElement.payload.imei[6] = (_imei) & 0xFF;
+            
+            size_t size;
+            gsmElement.payload.flags.asBit.online = 1;
+            char *hex = generate_position_hex(cells, &gsmElement.payload, &size);
 
-            char string[512];
+            char string[ESP_MODEM_C_API_STR_MAX];
             for (uint8_t i = 0; i < size; i++)
-            {
                 sprintf(&string[i * 2], "%02X", *(hex + i));
-            }
+
             string[size * 2] = 0x00;
 
-            ESP_LOGI(TAG, "To: %s:%d", gsmElement.server, gsmElement.port);
+            ESP_LOGI(TAG, "To: %s:%d", gsmElement.config.server, gsmElement.config.port);
             ESP_LOGI(TAG, "buffer HEX %d bytes: %s", size, string);
-            char encode64[450] = {0};
+            char encode64[ESP_MODEM_C_API_STR_MAX] = {0};
             size_t len_encoded = 0;
 
             mbedtls_base64_encode((unsigned char *)encode64, sizeof(encode64), &len_encoded, (unsigned char *)hex, size);
+            free(hex);
             ESP_LOGI(TAG, "buffer base64 %d bytes: %s", len_encoded, encode64);
 
-            sprintf(command, "AT+CIPSEND=%d\r", len_encoded);
-            err = esp_modem_at_raw(dce, command, response, ">", "ERROR", 500);
-
-            memcpy(&txDone.params, &gsmElement, sizeof(GSMTxReq_t));
-            if (gsmElement.n_erbs != 0)
-            {
-                memcpy(&txDone.erbs, &cells, gsmElement.n_erbs * sizeof(GSMERBPacket_t));
-            }
-            txDone.lastState = state;
+            memcpy(gsmTxRes.base64, encode64, len_encoded);
+            gsmTxRes.size = len_encoded;
+            gsmTxRes.lastState = state;
             prev_state = state;
             
+            sprintf(command, "AT+CIPSEND=%d\r", len_encoded);
+            gsmTxRes.lastErr = esp_modem_at_raw(dce, command, response, ">", "ERROR", 500);
+            ESP_LOGI(TAG, "\t\tAT+CIPSEND=%d response: %s | err [%d] %s ",len_encoded,response, gsmTxRes.lastErr,esp_err_to_name(gsmTxRes.lastErr));
             // send request was accepted
-            if (err == ESP_OK)
+            if (gsmTxRes.lastErr == ESP_OK)
             {
-                err = esp_modem_at_raw(dce, encode64, response, "SEND OK", "SEND FAIL", 90 * 1000);
-
-                if (err)
+                gsmTxRes.lastErr = esp_modem_at_raw(dce, encode64, response, "SEND OK", "SEND FAIL", 90 * 1000);
+                ESP_LOGI(TAG, "\t\tSEND response: %s | err [%d] %s ",response, gsmTxRes.lastErr,esp_err_to_name(gsmTxRes.lastErr));
+                if (gsmTxRes.lastErr == ESP_OK)
                 {
-                    ESP_LOGE(TAG, "Fail to send packet");
-                    txDone.lastRet = err;
-                    state = STATE_CLOSE_SOCKET;
+                    ESP_LOGI(TAG, "Success to send packet");
+                    state = STATE_RECEIVE_PACKET;
                 }
                 else
                 {
-                    ESP_LOGI(TAG, "Success to send packet");
-                    txDone.lastRet = ESP_OK;
-                    state = STATE_RECEIVE_PACKET;
+                    ESP_LOGE(TAG, "Fail to send packet");
+                    state = STATE_CLOSE_SOCKET;
                 }
             }
             else
             {
-                ESP_LOGE(TAG, "Send Request [AT+CIPSEND] Fail [%d] %s", err, printError(err));
-                txDone.lastRet = err;
+                ESP_LOGE(TAG, "Send Request [AT+CIPSEND] Fail [%d] %s", err, esp_err_to_name(err));
                 state = STATE_CLOSE_SOCKET;
             }
-            free(hex);
-            
-            esp_event_post(APP_EVENT, APP_EVENT_GSM_TX_RES, &txDone, sizeof(GSMTxRes_t), 0);
+           
+            esp_event_post(APP_EVENT, APP_EVENT_GSM_TX_RES, &gsmTxRes, sizeof(GSMTxRes_t), 0);
 
         }
         break;
@@ -883,15 +850,21 @@ void gsmTask(void *pvParameters)
                             token = strtok(NULL, delimiterinit);
                         }
                         if(token!= NULL)
+                        {
                             printf("\t\t[GSM_RX]: %s\r\n\r\n", token);
+                            memcpy(&gsmRx.payload, token, size);
+                            gsmRx.size = size;
+                            esp_event_post(APP_EVENT, APP_EVENT_GSM_RX, &gsmRx, sizeof(GSMRx_t), 0);
+                        }
                     }
-                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    
                 }
                 else  if (err == ESP_ERR_TIMEOUT)
                 {
                     break;
                 }
-                
+
+                vTaskDelay(pdMS_TO_TICKS(1000));
             }
             if (err == ESP_ERR_TIMEOUT)
             {
@@ -906,6 +879,52 @@ void gsmTask(void *pvParameters)
         case STATE_SEND_PREV_PACKET:
         {
             prev_state = state;
+            uint32_t prevPacketQty = 0;
+            gsmTxRes.lastErr = ESP_FAIL;
+            do
+            {
+                storage_gsm_get_id(&prevPacketQty);
+                ESP_LOGI(TAG, "[PREV_PACKETS] #%ld", prevPacketQty);
+                if(prevPacketQty)
+                {
+                    char base64[ESP_MODEM_C_API_STR_MAX];
+                    memset(base64, 0, sizeof(base64));
+                    size_t sizePrevMem = 0;
+                    esp_err_t ret = storage_gsm_get_last_position(base64, &sizePrevMem);
+                    ESP_LOGI(TAG, "get last position ret [%d] %s | size %d bytes | strlen %d bytes", ret, esp_err_to_name(ret), sizePrevMem, strlen(base64));
+                    if(ret== ESP_OK)
+                    {
+                        size_t size = (sizePrevMem < strlen(base64))?sizePrevMem:strlen(base64);
+                        memcpy(&gsmTxRes.base64, base64, size);
+                        gsmTxRes.size = size;
+                        gsmTxRes.lastState = state;
+
+                        sprintf(command, "AT+CIPSEND=%d\r", size);
+                        gsmTxRes.lastErr = esp_modem_at_raw(dce, command, response, ">", "ERROR", 500);
+                        ESP_LOGI(TAG, "\t\tAT+CIPSEND=%d response: %s | err [%d] %s ",size,response, gsmTxRes.lastErr,esp_err_to_name(gsmTxRes.lastErr));
+                        // send request was accepted
+                        if (gsmTxRes.lastErr == ESP_OK)
+                        {
+                            gsmTxRes.lastErr = esp_modem_at_raw(dce, base64, response, "SEND OK", "SEND FAIL", 30 * 1000);
+                            ESP_LOGI(TAG, "\t\tSEND response: %s | err [%d] %s ",response, gsmTxRes.lastErr,esp_err_to_name(gsmTxRes.lastErr));
+                            if (gsmTxRes.lastErr == ESP_OK)
+                            {
+                                ESP_LOGI(TAG, "Success to send prev packet");
+                            }
+                            else
+                            {
+                                ESP_LOGE(TAG, "Fail to send prev packet");
+                            }
+                        }
+                        else
+                        {
+                            ESP_LOGE(TAG, "Send Request [AT+CIPSEND] prev packet Fail [%d] %s", err, esp_err_to_name(err));
+                        }
+                        esp_event_post(APP_EVENT, APP_EVENT_GSM_TX_RES, &gsmTxRes, sizeof(GSMTxRes_t), 0);
+                    }
+                }
+
+            } while((prevPacketQty) && gsmTxRes.lastErr == ESP_OK);
             state = STATE_CLOSE_SOCKET;
         }
         break;
@@ -921,17 +940,33 @@ void gsmTask(void *pvParameters)
             state = STATE_SLEEP;
         }
         break;
-
+        
+        //Tx fail before tcp connection
         case STATE_REPORT_ERROR:
         {
-            memcpy(&txDone.params, &gsmElement, sizeof(GSMTxReq_t));
-            if (gsmElement.n_erbs != 0)
-            {
-                memcpy(&txDone.erbs, &cells, gsmElement.n_erbs * sizeof(GSMERBPacket_t));
-            }
-            txDone.lastState = prev_state;
-            txDone.lastRet = err2Send;
-            esp_event_post(APP_EVENT, APP_EVENT_GSM_TX_RES, &txDone, sizeof(GSMTxRes_t), 0);
+            size_t size;
+            char *hex = generate_position_hex(cells, &gsmElement.payload, &size);
+
+            char string[ESP_MODEM_C_API_STR_MAX];
+            for (size_t i = 0; i < size; i++)
+                sprintf(&string[i * 2], "%02X", *(hex + i));
+
+            string[size * 2] = 0x00;
+
+            ESP_LOGI(TAG, "buffer HEX %d bytes: %s", size, string);
+            char encode64[ESP_MODEM_C_API_STR_MAX] = {0};
+            size_t len_encoded = 0;
+
+            mbedtls_base64_encode((unsigned char *)encode64, sizeof(encode64), &len_encoded, (unsigned char *)hex, size);
+            free(hex);
+            ESP_LOGI(TAG, "buffer base64 %d bytes: %s", len_encoded, encode64);
+
+            memcpy(gsmTxRes.base64, encode64, len_encoded);
+            gsmTxRes.size = len_encoded;
+            gsmTxRes.lastErr = err2Send;
+            gsmTxRes.lastState = prev_state;
+
+            esp_event_post(APP_EVENT, APP_EVENT_GSM_TX_RES, &gsmTxRes, sizeof(GSMTxRes_t), 0);
             prev_state = state;
             state = STATE_SLEEP;
         }

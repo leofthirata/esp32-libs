@@ -54,7 +54,7 @@
 
 #define GSM_APN "simplepm.algar.br"
 #define GSM_SERVER "0.tcp.sa.ngrok.io"
-#define GSM_PORT 10235
+#define GSM_PORT 19124
 
 #pragma pack(1)
 
@@ -152,6 +152,26 @@ typedef struct
 
 typedef struct
 {
+	uint8_t power;
+} IscaBLEConfig_t;
+
+typedef struct
+{
+    char versionString[15];
+    uint8_t versionByte;
+} IscaFWConfig_t;
+
+typedef struct
+{
+    IscaFWConfig_t fw;
+    IscaGSMConfig_t gsm;
+    IscaP2PConfig_t p2p;
+    IscaLRWConfig_t lrw;
+    IscaBLEConfig_t ble;
+} IscaConfig_t;
+
+typedef struct
+{
     uint32_t p2pMovNorm : 20;
 	uint32_t p2pMovEmer  : 20;
 	uint32_t p2pStpNorm : 20;
@@ -164,6 +184,7 @@ typedef struct
 	uint32_t gsmMovEmer  : 20;
 	uint32_t gsmStpNorm : 20;
 	uint32_t gsmStpEmer  : 20;
+    uint16_t bleAdvTime;
 } IscaTimers_t;
 
 typedef struct
@@ -175,17 +196,8 @@ typedef struct
     IscaROM_t rom;
 
     //configuration
-    char* fwVer;
-    uint8_t fwVerProtocol;
-    //GSM
-    IscaGSMConfig_t gsmConfig;
-    //P2P
-    IscaP2PConfig_t p2pConfig;
-    //LRW
-    IscaLRWConfig_t lrwConfig;
-    //BLE
-	uint8_t blePower;
-	uint16_t bleAdvTime;
+    IscaConfig_t config;
+    
     //TIMERS
 	IscaTimers_t timers;
 } Isca_t;

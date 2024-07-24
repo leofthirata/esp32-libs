@@ -14,7 +14,7 @@
 #include "cmd_system.h"
 
 #include "stateMachine.hpp"
-#include "gsm.hpp"
+#include "gsm.h"
 #include "esp_netif.h"
 #include "esp_event.h"
 #include <esp_sleep.h>
@@ -22,6 +22,7 @@
 
 #include "otp.hpp"
 #include "esp_log.h"
+#include "memory.h"
 
 Storage::Storage *storage = nullptr;
 uint8_t mac[6];
@@ -29,7 +30,7 @@ static const char* TAG = "main.cpp";
 
 using namespace BiColorStatus;
  
-Isca_t config;
+static Isca_t _isca;
 static OTPMemory_t readMemory;
 
 void print_reset_reason(RESET_REASON reason)
@@ -57,8 +58,6 @@ void print_reset_reason(RESET_REASON reason)
 
 void button_handler (button_queue_t param)
 {
-    static uint32_t cnt = 0;
-    uint8_t type;
 
     switch(param.buttonState)
     {
@@ -71,14 +70,10 @@ void button_handler (button_queue_t param)
             if(param.buttonPrev == BTN_PRESSED)
             {
                 BiColorStatus::sendPosition();
-                //queueP2P();
-               // esp_event_post(APP_EVENT, APP_EVENT_REQ_P2P_SEND, NULL, 0, 0);
             }
             else
             {
                 BiColorStatus::batError();
-                //queueLRW();
-                //esp_event_post(APP_EVENT, APP_EVENT_REQ_LRW_SEND, NULL, 0, 0);
             }
         break;
 
@@ -89,25 +84,15 @@ void button_handler (button_queue_t param)
     
 }
 
-static void initialize_nvs(void)
-{
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK( nvs_flash_erase() );
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
-}
-
 void setup()
 {
+    storage_init();
+    
     // esp_console_repl_t *repl = NULL;
     // esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
-    initialize_nvs();
     // register_system_common();
     // esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
     // ESP_ERROR_CHECK(esp_console_new_repl_uart(&hw_config, &repl_config, &repl));
-    
     Serial.begin(115200);
     
     Serial.print("CPU0 reset reason: ");
@@ -122,52 +107,50 @@ void setup()
     // repl_config.prompt = PROMPT_STR ">";
     // repl_config.max_cmdline_length = 1024;
 
-    storage = new Storage::Storage();
-    ESP_ERROR_CHECK(storage->init());
 
     otpInit(NULL);
     otpRead(&readMemory);
 
-    memset(&config, 0, sizeof(config));
-    config.rom.loraId = (readMemory.loraID[0]<<16) + (readMemory.loraID[1]<<8) + (readMemory.loraID[2]);
-    memcpy(config.rom.deviceEUI, readMemory.devEUI, 8);
-    memcpy(config.rom.appEUI, readMemory.appEUI, 8);
-    config.rom.devAddr = (readMemory.devAddr[0]<<24) + (readMemory.devAddr[1]<<16) +
+    memset(&_isca, 0, sizeof(_isca));
+    _isca.rom.loraId = (readMemory.loraID[0]<<16) + (readMemory.loraID[1]<<8) + (readMemory.loraID[2]);
+    memcpy(_isca.rom.deviceEUI, readMemory.devEUI, 8);
+    memcpy(_isca.rom.appEUI, readMemory.appEUI, 8);
+    _isca.rom.devAddr = (readMemory.devAddr[0]<<24) + (readMemory.devAddr[1]<<16) +
         (readMemory.devAddr[2]<<8) + readMemory.devAddr[3];
-    memcpy(config.rom.nwkSKey, readMemory.nwSKey, 16);
-    memcpy(config.rom.appSKey, readMemory.appSKey, 16);
+    memcpy(_isca.rom.nwkSKey, readMemory.nwSKey, 16);
+    memcpy(_isca.rom.appSKey, readMemory.appSKey, 16);
     
-    printf("loraID: %ld | devAddress: %08lX\r\n", config.rom.loraId,config.rom.devAddr);
-    ESP_LOG_BUFFER_HEX("deviceEUI", config.rom.deviceEUI, sizeof(config.rom.deviceEUI));
-    ESP_LOG_BUFFER_HEX("appEUI", config.rom.appEUI, sizeof(config.rom.appEUI));
-    ESP_LOG_BUFFER_HEX("nwSKey", config.rom.nwkSKey, sizeof(config.rom.nwkSKey));
-    ESP_LOG_BUFFER_HEX("appSKey", config.rom.appSKey, sizeof(config.rom.appSKey));
+    printf("loraID: %ld | devAddress: %08lX\r\n", _isca.rom.loraId,_isca.rom.devAddr);
+    ESP_LOG_BUFFER_HEX("deviceEUI", _isca.rom.deviceEUI, sizeof(_isca.rom.deviceEUI));
+    ESP_LOG_BUFFER_HEX("appEUI", _isca.rom.appEUI, sizeof(_isca.rom.appEUI));
+    ESP_LOG_BUFFER_HEX("nwSKey", _isca.rom.nwkSKey, sizeof(_isca.rom.nwkSKey));
+    ESP_LOG_BUFFER_HEX("appSKey", _isca.rom.appSKey, sizeof(_isca.rom.appSKey));
 
-    config.p2pConfig.sf = P2P_SPREADING_FACTOR;
-    config.p2pConfig.bw = P2P_BANDWIDTH;
-    config.p2pConfig.cr = 1;
-    config.p2pConfig.txFreq = P2P_POS_FREQ;
-    config.p2pConfig.txPower = P2P_TX_POWER;
-    config.p2pConfig.rxFreq = P2P_CMD_FREQ;
-    config.p2pConfig.rxDelay = 0;
-    config.p2pConfig.rxTimeout = P2P_RX_TIMEOUT;
-    config.p2pConfig.txTimeout = P2P_TX_TIMEOUT;
+    _isca.config.p2p.sf = P2P_SPREADING_FACTOR;
+    _isca.config.p2p.bw = P2P_BANDWIDTH;
+    _isca.config.p2p.cr = 1;
+    _isca.config.p2p.txFreq = P2P_POS_FREQ;
+    _isca.config.p2p.txPower = P2P_TX_POWER;
+    _isca.config.p2p.rxFreq = P2P_CMD_FREQ;
+    _isca.config.p2p.rxDelay = 0;
+    _isca.config.p2p.rxTimeout = P2P_RX_TIMEOUT;
+    _isca.config.p2p.txTimeout = P2P_TX_TIMEOUT;
 
-    config.lrwConfig.confirmed = false;
-    config.lrwConfig.posPort = LRW_POS_PORT;
-    config.lrwConfig.cmdPort = LRW_CMD_PORT;
-    config.lrwConfig.statusPort = LRW_STATUS_PORT;
-    config.lrwConfig.adr = false;
+    _isca.config.lrw.confirmed = false;
+    _isca.config.lrw.posPort = LRW_POS_PORT;
+    _isca.config.lrw.cmdPort = LRW_CMD_PORT;
+    _isca.config.lrw.statusPort = LRW_STATUS_PORT;
+    _isca.config.lrw.adr = false;
 
     ESP_ERROR_CHECK(esp_efuse_mac_get_default(mac));
     ESP_ERROR_CHECK(esp_base_mac_addr_set(mac));
     ESP_LOGW(TAG, "MAC: " MACSTR " ", MAC2STR(mac));
 
-    memcpy(&config.rom.bleMac, mac, sizeof(config.rom.bleMac));
+    memcpy(&_isca.rom.bleMac, mac, sizeof(_isca.rom.bleMac));
 
-    memcpy(&config.gsmConfig.apn, GSM_APN, strlen(GSM_APN));
-    memcpy(&config.gsmConfig.server, GSM_SERVER, strlen(GSM_SERVER));
-    config.gsmConfig.port = GSM_PORT;
+    memcpy(&_isca.config.gsm.apn, GSM_APN, strlen(GSM_APN));
+    memcpy(&_isca.config.gsm.server, GSM_SERVER, strlen(GSM_SERVER));
+    _isca.config.gsm.port = GSM_PORT;
 
     button_init_t button = {
         .buttonEventHandler = button_handler,
@@ -182,15 +165,15 @@ void setup()
     BiColorStatus::turnOn();
 
     // Low priority numbers denote low priority tasks. The idle task has priority zero (tskIDLE_PRIORITY). 
-    xTaskCreatePinnedToCore(sensorsTask, "sensorsTask", 4096, (void*) &config, 5, NULL, 0);
-    //xTaskCreatePinnedToCore(loraTask, "loraTask", 4096, (void*) &config, 5, NULL, 0);
-    xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &config, 6, NULL, 0);
-    xTaskCreate(gsmTask, "gsmTask", 8192, (void*) &config, uxTaskPriorityGet(NULL), NULL);
+    xTaskCreatePinnedToCore(sensorsTask, "sensorsTask", 4096, (void*) &_isca, 5, NULL, 0);
+    //xTaskCreatePinnedToCore(loraTask, "loraTask", 4096, (void*) &_isca, 5, NULL, 0);
+    //xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &_isca, 6, NULL, 0);
+    xTaskCreate(gsmTask, "gsmTask", 8192, (void*) &_isca, uxTaskPriorityGet(NULL), NULL);
     // ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
 
 
 void loop()
 {
-    vTaskDelay(5000);
+    vTaskDelay(3000);
 }

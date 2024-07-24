@@ -1,11 +1,30 @@
-#ifndef __GSM_HPP__
-#define __GSM_HPP__
+#ifndef __GSM_H__
+#define __GSM_H__
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 #pragma once
 void gsmTask(void *pvParameters);
+
+typedef struct
+{
+    int cell;   // 0 The serving cell, 1-6 The index of the neighboring cell
+    int bcch;   // ARFCN(Absolute radio frequency channel number) of BCCH carrier, in decimal format
+    int rxl;    // Receive level, in decimal format
+    int rxq;    // Receive quality, in decimal format
+    int mcc;    // Mobile country code, in decimal format
+    int mnc;    // Mobile network code, in decimal format
+    int bsic;   // Base station identity code, in decimal format
+    int cellid; // Cell id, in hexadecimal format
+    int rla;    // Receive level access minimum, in decimal format
+    int txp;    // Transmit power maximum CCCH, in decimal format
+    int lac;    // Location area code, in hexadecimal format
+    int ta;     // Timing Advance, in decimal format
+    int dbm;    // Receiving level in dBm
+    int c1;     // C1 value
+    int c2;     // C2 value
+} mdm_lbs_cell_t;
 
 typedef struct
 {
@@ -47,11 +66,21 @@ typedef struct
     GSMFlagsUnion_t flags;
     uint8_t lastRst;
     uint8_t n_erbs;
+} GSMTxPayload_t;
+
+typedef struct
+{
     char apn[64];
     char user[64];
     char pswd[64];
     uint16_t port;
     char server[64];
+} GSMTxConfig_t;
+
+typedef struct
+{
+    GSMTxPayload_t payload;
+    GSMTxConfig_t config;
 } GSMTxReq_t;
 
 typedef struct
@@ -92,27 +121,25 @@ typedef enum
 
 typedef struct
 {
-    GSMTxReq_t params;
-    GSMERBPacket_t erbs[NUM_MAX_ERB];
+    char base64[ESP_MODEM_C_API_STR_MAX];
+    uint16_t size;
     en_task_state lastState;
-    esp_err_t lastRet;
+    esp_err_t lastErr;
 } GSMTxRes_t;
 
 
 typedef struct
 {
-    //IP
-    //TimeStamp
-    //port
-    // size
-    //payload
+    char payload[ESP_MODEM_C_API_STR_MAX];
+    uint16_t size;
 } GSMRx_t;
 
 const char* printState(en_task_state state);
-const char *printError(esp_err_t ret);
+char *generate_position_hex(mdm_lbs_cell_t *cells, GSMTxPayload_t *_data, size_t *size);
+uint8_t crc8_itu(uint8_t *data, uint16_t length);
 #ifdef __cplusplus
 }
 #endif
 
 
-#endif //__GSM_HPP__
+#endif //__GSM_H__
