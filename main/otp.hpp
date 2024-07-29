@@ -16,8 +16,8 @@ typedef struct
     uint8_t appSKey[16];
 } OTPMemory_t;
 
-void otpInit(void *parameter);
-void otpRead(OTPMemory_t *memoryRead);
+uint8_t otpInit(void *parameter);
+uint8_t otpRead(OTPMemory_t *memoryRead);
 
 #define OTP_MEM_VER 0x01
 #endif //__OTP_HPP__

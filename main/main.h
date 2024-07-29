@@ -28,6 +28,7 @@
 
 #define PIN_BAT_ADC_CTRL    GPIO_NUM_15
 
+#define PIN_NUM_GSM_NETLIGHT 37
 
 #define SCHED_MAX_EVENT_DATA_SIZE APP_TIMER_SCHED_EVENT_DATA_SIZE /**< Maximum size of scheduler events. */
 #define SCHED_QUEUE_SIZE 60										  /**< Maximum number of events in the scheduler queue. */
@@ -54,7 +55,7 @@
 
 #define GSM_APN "simplepm.algar.br"
 #define GSM_SERVER "0.tcp.sa.ngrok.io"
-#define GSM_PORT 19124
+#define GSM_PORT 18469
 
 #pragma pack(1)
 

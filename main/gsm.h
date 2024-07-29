@@ -104,6 +104,7 @@ typedef enum
     STATE_CHECK_SIGNAL,
     STATE_CHECK_OPERATOR,
     STATE_SCAN_NETWORKS,
+    STATE_UPDATE_CLOCK,
     STATE_GET_IP,
     STATE_GET_LBS_POSITION,
     STATE_CHECK_IP,
@@ -133,6 +134,29 @@ typedef struct
     char payload[ESP_MODEM_C_API_STR_MAX];
     uint16_t size;
 } GSMRx_t;
+
+#define NETLIGHT_REPORT_TIMEOUT 60000000 //us
+#define NETLIGHT_OFF_TIMEOUT    3300000 //us
+
+#define NETLIGHT_QUEUE_SIZE 5
+#define GSM_RX_WINDOW  5000000 //us
+
+typedef enum
+{
+    OFF,
+    NOT_REGISTERED,
+    REGISTERED,
+    GPRS_CONNECTED,
+    UNKNOWN = 0xff,
+} NetlightStatus_t;
+
+typedef struct
+{
+    NetlightStatus_t status;
+    unsigned long positivePulseWidth;
+    unsigned long negativePulseWidth;
+    unsigned long lastNegativePulseStartTime;
+} R800CNetlight_t;
 
 const char* printState(en_task_state state);
 char *generate_position_hex(mdm_lbs_cell_t *cells, GSMTxPayload_t *_data, size_t *size);

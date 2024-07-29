@@ -60,7 +60,7 @@ const char* printR800CNetlightStatus(NetlightStatus_t status)
         break;
 
         case NOT_REGISTERED:
-            return "Not registered the network";
+            return "Not registered to the network";
         break;
 
         case REGISTERED:
@@ -93,7 +93,11 @@ static void IRAM_ATTR netlightISR()
         if((now - m_R800CNetlight.lastNegativePulseStartTime) < NETLIGHT_OFF_TIMEOUT)
             m_R800CNetlight.negativePulseWidth = (now - negativePulseStartTime) / 1000; // pulse in ms
         else
+        {
             m_R800CNetlight.negativePulseWidth = 0;
+            state = UNKNOWN;
+            prev_state = UNKNOWN;
+        }
     }
     else // If the change was a FALLING edge
     {
@@ -101,7 +105,11 @@ static void IRAM_ATTR netlightISR()
         if ((now - m_R800CNetlight.lastNegativePulseStartTime) < NETLIGHT_OFF_TIMEOUT)
             m_R800CNetlight.positivePulseWidth = (now - positivePulseStartTime) / 1000; // pulse in ms
         else
+        {
             m_R800CNetlight.positivePulseWidth = 0;
+            state = UNKNOWN;
+            prev_state = UNKNOWN;
+        }
 
         m_R800CNetlight.lastNegativePulseStartTime = now;
 
@@ -137,7 +145,7 @@ static void IRAM_ATTR netlightISR()
     }
     else
     {
-        if(now - lastReport > NETLIGHT_REPORT_TIMEOUT)
+        if(now - lastReport > NETLIGHT_REPORT_TIMEOUT && state != UNKNOWN)
         {
             lastReport = now;
             m_R800CNetlight.status = state;
@@ -250,12 +258,42 @@ void setup()
 
     xTaskCreatePinnedToCore(statusTask, "statusTask", 4096, NULL, 5, NULL, 0);
 }
-
+char buffer[90] = {0};
+const char powerOn[]={0x41, 0x54, 0x2b, 0x50, 0x57, 0x52, 0x4f, 0x4e, 0x00};
+const char powerOff[]={0x41, 0x54, 0x2b, 0x50, 0x57, 0x52, 0x4f, 0x46, 0x46, 0x00};
+uint8_t pos = 0;
+char *_token = NULL;
 void loop()
 {
     if (Serial.available())
     {
-        Serial1.write(Serial.read());
+        int read = Serial.read();
+        if(read == 0x0D)
+        {
+            memset(buffer, 0, sizeof(buffer));
+            pos = 0;
+        }
+        else
+            buffer[pos++] = read;
+        
+        Serial1.write(read);
+        if(pos >= strlen(powerOn) || pos >= strlen(powerOff))
+        {
+            _token = strstr(buffer, powerOn);
+            if(_token != NULL)
+            {
+                printf("GOT powerON!\r\n");
+                power_on_modem();
+            }
+            
+            _token = strstr(buffer, powerOff);
+            if(_token != NULL)
+            {
+                printf("GOT powerOFF\r\n");
+                power_off_modem();
+            }
+        }
+
     }
 
     // computer to R800C
