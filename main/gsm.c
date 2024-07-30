@@ -63,7 +63,7 @@ void power_on_modem()
     while (uxQueueSpacesAvailable(xQueueR800CNetlight) < NETLIGHT_QUEUE_SIZE)
     {
         xQueueReceive(xQueueR800CNetlight, &qElementNetlight, pdMS_TO_TICKS(10000));
-        ESP_LOGW(TAG, "Taking netlight status from queue: %s | positive %ld ms | negative %ld ms",
+        ESP_LOGW(TAG, "Taking netlight status from queue: %s | positive %lu ms | negative %lu ms",
                         printR800CNetlightStatus(qElementNetlight.status),
                         qElementNetlight.positivePulseWidth, qElementNetlight.negativePulseWidth);
     }
@@ -88,12 +88,14 @@ void power_off_modem(esp_modem_dce_t *dce)
 
     while ((esp_timer_get_time() - start) < 10000000)
     {
-        xQueueReceive(xQueueR800CNetlight, &qElementNetlight, pdMS_TO_TICKS(3000));
-        ESP_LOGI(TAG, "Got netlight status: %s | positive %ld ms | negative %ld ms",
-                printR800CNetlightStatus(qElementNetlight.status),
-                qElementNetlight.positivePulseWidth, qElementNetlight.negativePulseWidth);
-        if(qElementNetlight.status == OFF)
-            break;
+        if(xQueueReceive(xQueueR800CNetlight, &qElementNetlight, pdMS_TO_TICKS(3000)))
+        {
+            ESP_LOGI(TAG, "Got netlight status: [%d] %s | positive %lu ms | negative %lu ms",
+                    qElementNetlight.status, printR800CNetlightStatus(qElementNetlight.status),
+                    qElementNetlight.positivePulseWidth, qElementNetlight.negativePulseWidth);
+            if(qElementNetlight.status == OFF)
+                break;
+        }
     }
     
     gpio_set_level(GPIO_OUTPUT_POWER_ON, false);
@@ -263,9 +265,6 @@ const char* printR800CNetlightStatus(NetlightStatus_t status)
             return "GPRS communication is established";
         break;
 
-        case UNKNOWN:
-            return "UNKNOWN";
-        break;
     }
     return "ERROR";
 }
@@ -273,11 +272,10 @@ const char* printR800CNetlightStatus(NetlightStatus_t status)
 static void IRAM_ATTR netlightISR()
 {
     static unsigned long positivePulseStartTime = 0, negativePulseStartTime = 0;
-    static NetlightStatus_t state = UNKNOWN, prev_state = UNKNOWN;
-    R800CNetlight_t m_R800CNetlight;
+    static R800CNetlight_t m_R800CNetlight = {OFF, OFF, 0, 0, 0};
     
-    static int64_t lastReport = 0;
-    int64_t now = micros();
+    static unsigned long lastReport = 0;
+    unsigned long now = micros();
 
     if (gpio_get_level((gpio_num_t)PIN_NUM_GSM_NETLIGHT) == HIGH) // If the change was a RISING edge
     {
@@ -287,8 +285,8 @@ static void IRAM_ATTR netlightISR()
         else
         {
             m_R800CNetlight.negativePulseWidth = 0;
-            state = UNKNOWN;
-            prev_state = UNKNOWN;
+            m_R800CNetlight.status = OFF;
+            m_R800CNetlight.prev = OFF;
         }
     }
     else // If the change was a FALLING edge
@@ -299,8 +297,8 @@ static void IRAM_ATTR netlightISR()
         else
         {
             m_R800CNetlight.positivePulseWidth = 0;
-            state = UNKNOWN;
-            prev_state = UNKNOWN;
+            m_R800CNetlight.status = OFF;
+            m_R800CNetlight.prev = OFF;
         }
 
         m_R800CNetlight.lastNegativePulseStartTime = now;
@@ -313,34 +311,36 @@ static void IRAM_ATTR netlightISR()
     }
     
     //64 - 10%
-    if (m_R800CNetlight.positivePulseWidth > 58) 
+    if (m_R800CNetlight.positivePulseWidth > 58 ) 
     {
         // 300ms +- 10%
         if (m_R800CNetlight.negativePulseWidth < 330 && m_R800CNetlight.negativePulseWidth > 270)
-            state = GPRS_CONNECTED;
+            m_R800CNetlight.status = GPRS_CONNECTED;
 
         // 800ms +- 10%
         else if (m_R800CNetlight.negativePulseWidth < 880 && m_R800CNetlight.negativePulseWidth > 720)
-            state = NOT_REGISTERED;
+            m_R800CNetlight.status = NOT_REGISTERED;
 
         // 3000ms +- 10%
         else if (m_R800CNetlight.negativePulseWidth < 3300 && m_R800CNetlight.negativePulseWidth > 2700)
-            state = REGISTERED;
-    }
-
-    if (state != prev_state)
-    {
-        prev_state = state;
-        lastReport = now;
-        m_R800CNetlight.status = state;
-        xQueueSendFromISR(xQueueR800CNetlight, &m_R800CNetlight, NULL);
+            m_R800CNetlight.status = REGISTERED;
     }
     else
     {
-        if(now - lastReport > NETLIGHT_REPORT_TIMEOUT && state != UNKNOWN)
+        m_R800CNetlight.status = OFF;
+    }
+
+    if (m_R800CNetlight.status != m_R800CNetlight.prev)
+    {
+        lastReport = now; 
+        xQueueSendFromISR(xQueueR800CNetlight, &m_R800CNetlight, NULL);
+        m_R800CNetlight.prev = m_R800CNetlight.status;
+    }
+    else
+    {
+        if(now - lastReport > NETLIGHT_REPORT_TIMEOUT && m_R800CNetlight.status != OFF)
         {
             lastReport = now;
-            m_R800CNetlight.status = state;
             xQueueSendFromISR(xQueueR800CNetlight, &m_R800CNetlight, NULL);
         }
     }
@@ -348,13 +348,10 @@ static void IRAM_ATTR netlightISR()
 
 static void netlightTimerCallback(void *arg)
 {
-    R800CNetlight_t R800CNetlight;
-    R800CNetlight.status = OFF;
-    R800CNetlight.lastNegativePulseStartTime = 0;
-    R800CNetlight.negativePulseWidth = 0;
-    R800CNetlight.positivePulseWidth = 0;
+    R800CNetlight_t R800CNetlight = {OFF, OFF, 0, 0, 0};
     xQueueSend(xQueueR800CNetlight, &R800CNetlight, 0);
 }
+
 void gsmTask(void *pvParameters)
 {
     esp_err_t err = ESP_FAIL, err2Send = ESP_FAIL;
@@ -422,13 +419,12 @@ void gsmTask(void *pvParameters)
             power_on_modem();
             if(xQueueReceive(xQueueR800CNetlight, &qElementNetlight, pdMS_TO_TICKS(10000)))
             {
-                ESP_LOGI(TAG, "Got netlight status: %s | positive %ld ms | negative %ld ms",
+                ESP_LOGI(TAG, "Got netlight status: %s | positive %lu ms | negative %lu ms",
                         printR800CNetlightStatus(qElementNetlight.status),
                         qElementNetlight.positivePulseWidth, qElementNetlight.negativePulseWidth);
                 
                 if(qElementNetlight.status == NOT_REGISTERED) // modem turned on
                     break;
-
             }
             else
             {
@@ -574,7 +570,7 @@ void gsmTask(void *pvParameters)
 
                 if(xQueueReceive(xQueueR800CNetlight, &qElementNetlight, pdMS_TO_TICKS(10000)))
                 {
-                    ESP_LOGI(TAG, "Got netlight status: %s | positive %ld ms | negative %ld ms",
+                    ESP_LOGI(TAG, "Got netlight status: %s | positive %lu ms | negative %lu ms",
                             printR800CNetlightStatus(qElementNetlight.status),
                             qElementNetlight.positivePulseWidth, qElementNetlight.negativePulseWidth);
                     
@@ -649,7 +645,7 @@ void gsmTask(void *pvParameters)
                 {
                     if (prms[0] > 5)
                     {
-                        ESP_LOGI(TAG, "\t\t ");
+                        ESP_LOGI(TAG, "\t\t AT+CENG=4,1");
                         esp_modem_at_raw(dce, "AT+CENG=4,1\r", response, "OK", "ERROR", 500);
                         state = STATE_CHECK_OPERATOR;
                     }
@@ -804,9 +800,18 @@ void gsmTask(void *pvParameters)
 
                 struct timeval tv;
                 tv.tv_sec = t;
+                
                 printf("Setting time: %s\r\n", asctime(&tm));
                 settimeofday(&tv, NULL);
 
+                struct timeval current;
+                gettimeofday(&current, NULL);
+                printf(" Second : %llu \n Microsecond : %06lu\r\n",
+                    current.tv_sec, current.tv_usec);
+                char buf[255];
+                strftime(buf, sizeof(buf), "%d %b %Y %H:%M:%S", &tm);
+                ESP_LOGW(TAG, "%s", buf);
+                
                 prev_state = state;
                 state = STATE_OPEN_SOCKET;
             }

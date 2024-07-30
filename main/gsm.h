@@ -147,13 +147,13 @@ typedef enum
     NOT_REGISTERED,
     REGISTERED,
     GPRS_CONNECTED,
-    UNKNOWN = 0xff,
 } NetlightStatus_t;
 
 typedef struct
 {
     NetlightStatus_t status;
-    unsigned long positivePulseWidth;
+    NetlightStatus_t prev;
+    unsigned long  positivePulseWidth;
     unsigned long negativePulseWidth;
     unsigned long lastNegativePulseStartTime;
 } R800CNetlight_t;
