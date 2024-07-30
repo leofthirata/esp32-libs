@@ -638,6 +638,7 @@ void gsmTask(void *pvParameters)
             case STATE_CHECK_SIGNAL:
             {
                 prev_state = state;
+                static uint8_t count = 0;
                 int *prms = (int *)calloc(sizeof(int), 2);
                 ESP_LOGI(TAG, "\t\t AT+CSQ");
                 esp_err_t ret = esp_modem_get_signal_quality(dce, &prms[0], &prms[1]);
@@ -648,13 +649,26 @@ void gsmTask(void *pvParameters)
                         ESP_LOGI(TAG, "\t\t AT+CENG=4,1");
                         esp_modem_at_raw(dce, "AT+CENG=4,1\r", response, "OK", "ERROR", 500);
                         state = STATE_CHECK_OPERATOR;
+                        count = 0;
                     }
-                        vTaskDelay(pdMS_TO_TICKS(1000));
+                    else
+                    {
+                        ESP_LOGW(TAG, "\t\t CSQ: %d <= 5", prms[0]);
+                        if(count++ >= 10)
+                        {
+                            err2Send = ret;
+                            state = STATE_REPORT_ERROR;
+                            count = 0;
+                        }
+                    }
+                    
+                    vTaskDelay(pdMS_TO_TICKS(3000));
                 }
                 else if (ret == ESP_ERR_TIMEOUT)
                 {
                     err2Send = ret;
                     state = STATE_REPORT_ERROR;
+                    count = 0;
                 }
                 else
                     vTaskDelay(3000);

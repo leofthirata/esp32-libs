@@ -54,11 +54,11 @@
 #define LRW_CMD_PORT		57
 
 #define GSM_APN "simplepm.algar.br"
-// #define GSM_SERVER "0.tcp.sa.ngrok.io"
-// #define GSM_PORT 18469
+#define GSM_SERVER "0.tcp.sa.ngrok.io"
+#define GSM_PORT 14527
 
-#define GSM_SERVER "mogno.ceabs.net"
-#define GSM_PORT 9015
+// #define GSM_SERVER "mogno.ceabs.net"
+// #define GSM_PORT 9015
 #pragma pack(1)
 
 typedef struct
