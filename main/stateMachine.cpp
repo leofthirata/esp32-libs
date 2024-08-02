@@ -471,6 +471,11 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
         xTaskNotify(xTaskToNotify, BIT_LRW_REQ_TX_STATUS, eSetBits);
     }
 
+    if(event_base == APP_EVENT && event_id == APP_EVENT_SEND_POS)
+    {
+        xTaskNotify(xTaskToNotify, BIT_LRW_TX_REQ | BIT_GSM_TX_REQ | BIT_P2P_TX_REQ, eSetBits);
+    }
+
     if(event_base == APP_EVENT && event_id == APP_EVENT_SENSORS_STATUS)
     {
         SensorsStatus_t *_sensorStatus_p = (SensorsStatus_t*) event_data;
@@ -521,12 +526,19 @@ void stateTask (void* pvParameters)
     ESP_ERROR_CHECK(esp_timer_create(&lrwTimerArgs, &lrwTimer));
     ESP_ERROR_CHECK(esp_timer_create(&gsmTimerArgs, &gsmTimer));
         
-    m_isca->timers.p2pStpEmer = 0x1E;
-    m_isca->timers.p2pStpNorm = 0x3C;
-    m_isca->timers.lrwStpEmer = 0x1E;
-    m_isca->timers.lrwStpNorm = 0x3C;
-    m_isca->timers.gsmStpEmer = 0x3C;
-    m_isca->timers.gsmStpNorm = 0x3C;
+    m_isca->timers.p2pStpEmer = 0x12C;
+    m_isca->timers.p2pStpNorm = 0x12C;
+    m_isca->timers.lrwStpEmer = 0x12C;
+    m_isca->timers.lrwStpNorm = 0x12C;
+    m_isca->timers.gsmStpEmer = 0x12C;
+    m_isca->timers.gsmStpNorm = 0x12C;
+
+    m_isca->timers.p2pMovEmer = 0xB4;
+    m_isca->timers.p2pMovNorm = 0xB4;
+    m_isca->timers.lrwMovEmer = 0xB4;
+    m_isca->timers.lrwMovNorm = 0xB4;
+    m_isca->timers.gsmMovEmer = 0xB4;
+    m_isca->timers.gsmMovNorm = 0xB4;
     
     uint32_t ulNotifiedValue = 0;
     const TickType_t xMaxBlockTime = pdMS_TO_TICKS( TIMEOUT_STATE_MACHINE );

@@ -134,7 +134,8 @@ void button_handler (button_queue_t param)
             if(param.buttonPrev == BTN_PRESSED)
             {
                 BiColorStatus::sendPosition();
-                _sendPosition();
+                // _sendPosition();
+                esp_event_post(APP_EVENT, APP_EVENT_SEND_POS, NULL, NULL, 0);
             }
             else
             {
@@ -149,16 +150,16 @@ void button_handler (button_queue_t param)
     
 }
 
-static void app_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data)
-{
-    if(event_base == APP_EVENT && event_id == APP_EVENT_GSM_TX_RES)
-    {
-        GSMTxRes_t *gsmTxRes_p = (GSMTxRes_t*) event_data;
-        memcpy(&gsmTxRes, gsmTxRes_p, sizeof(GSMTxRes_t));
-        xTaskNotify(xTaskToNotify, BIT_GSM_TX_RES, eSetBits);
-    }
-}
+// static void app_event_handler(void *arg, esp_event_base_t event_base,
+//                                int32_t event_id, void *event_data)
+// {
+//     if(event_base == APP_EVENT && event_id == APP_EVENT_GSM_TX_RES)
+//     {
+//         GSMTxRes_t *gsmTxRes_p = (GSMTxRes_t*) event_data;
+//         memcpy(&gsmTxRes, gsmTxRes_p, sizeof(GSMTxRes_t));
+//         xTaskNotify(xTaskToNotify, BIT_GSM_TX_RES, eSetBits);
+//     }
+// }
 
 void setup()
 {
@@ -199,27 +200,37 @@ void setup()
 
     } while (numTries++ < 4 && ret != 0);
     
-    if(ret == 0)
-    {
-        memset(&_isca, 0, sizeof(_isca));
-        _isca.rom.loraId = (readMemory.loraID[0]<<16) + (readMemory.loraID[1]<<8) + (readMemory.loraID[2]);
-        memcpy(_isca.rom.deviceEUI, readMemory.devEUI, 8);
-        memcpy(_isca.rom.appEUI, readMemory.appEUI, 8);
-        _isca.rom.devAddr = (readMemory.devAddr[0]<<24) + (readMemory.devAddr[1]<<16) +
-            (readMemory.devAddr[2]<<8) + readMemory.devAddr[3];
-        memcpy(_isca.rom.nwkSKey, readMemory.nwSKey, 16);
-        memcpy(_isca.rom.appSKey, readMemory.appSKey, 16);
-        
-        printf("loraID: %ld | devAddress: %08lX\r\n", _isca.rom.loraId,_isca.rom.devAddr);
-        ESP_LOG_BUFFER_HEX("deviceEUI", _isca.rom.deviceEUI, sizeof(_isca.rom.deviceEUI));
-        ESP_LOG_BUFFER_HEX("appEUI", _isca.rom.appEUI, sizeof(_isca.rom.appEUI));
-        ESP_LOG_BUFFER_HEX("nwSKey", _isca.rom.nwkSKey, sizeof(_isca.rom.nwkSKey));
-        ESP_LOG_BUFFER_HEX("appSKey", _isca.rom.appSKey, sizeof(_isca.rom.appSKey));
-    }
-    else
+    if(ret != 0)
     {
         ESP_LOGE(TAG, "error memory OneWire");
+        OTPMemory_t hardCodedROM = {
+                        .memVer = 0xDD,
+                        .hwVer = 0xAA,
+                        .prefixSN = 0x6D,
+                        .loraID = {0xbe, 0xbc, 0x25},
+                        .devAddr = {0x5d, 0x1f, 0x42, 0x61},
+                        .devEUI = {0x34, 0xe5, 0x51, 0xdf, 0x6d, 0xab, 0xc5, 0x6b},
+                        .appEUI = {0x2c, 0xa5, 0xae, 0x9d, 0xf4, 0xaf, 0x41, 0x4a},
+                        .nwSKey = {0x45, 0x5d, 0xd8, 0xb2, 0x11, 0x65, 0x3e, 0x5c, 0xbd, 0xbf, 0xb1, 0x29, 0xa3, 0x29, 0xb2, 0x99},
+                        .appSKey = {0x5e, 0xc0, 0x07, 0x25, 0x72, 0x47, 0xf1, 0xb0, 0x9a, 0xad, 0x8f, 0x61, 0xe8, 0xca, 0x4d, 0xd1}
+        };
+        memcpy(&readMemory, &hardCodedROM, sizeof(OTPMemory_t));
     }
+
+    memset(&_isca, 0, sizeof(_isca));
+    _isca.rom.loraId = (readMemory.loraID[0]<<16) + (readMemory.loraID[1]<<8) + (readMemory.loraID[2]);
+    memcpy(_isca.rom.deviceEUI, readMemory.devEUI, 8);
+    memcpy(_isca.rom.appEUI, readMemory.appEUI, 8);
+    _isca.rom.devAddr = (readMemory.devAddr[0]<<24) + (readMemory.devAddr[1]<<16) +
+        (readMemory.devAddr[2]<<8) + readMemory.devAddr[3];
+    memcpy(_isca.rom.nwkSKey, readMemory.nwSKey, 16);
+    memcpy(_isca.rom.appSKey, readMemory.appSKey, 16);
+    
+    printf("loraID: %ld | devAddress: %08lX\r\n", _isca.rom.loraId,_isca.rom.devAddr);
+    ESP_LOG_BUFFER_HEX("deviceEUI", _isca.rom.deviceEUI, sizeof(_isca.rom.deviceEUI));
+    ESP_LOG_BUFFER_HEX("appEUI", _isca.rom.appEUI, sizeof(_isca.rom.appEUI));
+    ESP_LOG_BUFFER_HEX("nwSKey", _isca.rom.nwkSKey, sizeof(_isca.rom.nwkSKey));
+    ESP_LOG_BUFFER_HEX("appSKey", _isca.rom.appSKey, sizeof(_isca.rom.appSKey));
 
     _isca.config.p2p.sf = P2P_SPREADING_FACTOR;
     _isca.config.p2p.bw = P2P_BANDWIDTH;
@@ -259,13 +270,14 @@ void setup()
     BiColorStatus::init();
     BiColorStatus::turnOn();
 
-    xTaskToNotify = xTaskGetCurrentTaskHandle();
+    // xTaskToNotify = xTaskGetCurrentTaskHandle();
 
-    esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);     
+    // esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);     
+    
     // Low priority numbers denote low priority tasks. The idle task has priority zero (tskIDLE_PRIORITY). 
-    // xTaskCreatePinnedToCore(sensorsTask, "sensorsTask", 4096, (void*) &_isca, 5, NULL, 0);
-    //xTaskCreatePinnedToCore(loraTask, "loraTask", 4096, (void*) &_isca, 5, NULL, 0);
-    // xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &_isca, 6, NULL, 0);
+    xTaskCreatePinnedToCore(sensorsTask, "sensorsTask", 4096, (void*) &_isca, 5, NULL, 0);
+    xTaskCreatePinnedToCore(loraTask, "loraTask", 4096, (void*) &_isca, 5, NULL, 0);
+    xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &_isca, 6, NULL, 0);
     xTaskCreate(gsmTask, "gsmTask", 8192, (void*) &_isca, uxTaskPriorityGet(NULL), NULL);
     // ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
@@ -274,78 +286,79 @@ uint32_t ulNotifiedValue = 0;
 
 void loop()
 {
-    xTaskNotifyWait( pdFALSE, pdTRUE, &ulNotifiedValue, portMAX_DELAY);
-    unsigned char hexArray[ESP_MODEM_C_API_STR_MAX];  
-    size_t hexArrayLen= 0, encodedLen = 0;
-    mbedtls_base64_decode(hexArray, sizeof(hexArray), &hexArrayLen, (const unsigned char*)gsmTxRes.base64, gsmTxRes.size);
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    // xTaskNotifyWait( pdFALSE, pdTRUE, &ulNotifiedValue, portMAX_DELAY);
+    // unsigned char hexArray[ESP_MODEM_C_API_STR_MAX];  
+    // size_t hexArrayLen= 0, encodedLen = 0;
+    // mbedtls_base64_decode(hexArray, sizeof(hexArray), &hexArrayLen, (const unsigned char*)gsmTxRes.base64, gsmTxRes.size);
     
-    GSMTxPayload_t *element_p = (GSMTxPayload_t*)hexArray;
-    uint64_t serialNumber = 0L;
-    serialNumber += (((uint64_t) element_p->serialNumber[0]) << 32);
-    serialNumber += (((uint64_t) element_p->serialNumber[1]) << 24);
-    serialNumber += (((uint64_t) element_p->serialNumber[2]) << 16);
-    serialNumber += (((uint64_t) element_p->serialNumber[3]) << 8);
-    serialNumber += (((uint64_t) element_p->serialNumber[4]));
+    // GSMTxPayload_t *element_p = (GSMTxPayload_t*)hexArray;
+    // uint64_t serialNumber = 0L;
+    // serialNumber += (((uint64_t) element_p->serialNumber[0]) << 32);
+    // serialNumber += (((uint64_t) element_p->serialNumber[1]) << 24);
+    // serialNumber += (((uint64_t) element_p->serialNumber[2]) << 16);
+    // serialNumber += (((uint64_t) element_p->serialNumber[3]) << 8);
+    // serialNumber += (((uint64_t) element_p->serialNumber[4]));
 
-    uint64_t imei = 0L;
-    imei += (((uint64_t) element_p->imei[0]) << 48);
-    imei += (((uint64_t) element_p->imei[1]) << 40);
-    imei += (((uint64_t) element_p->imei[2]) << 32);
-    imei += (((uint64_t) element_p->imei[3]) << 24);
-    imei += (((uint64_t) element_p->imei[4]) << 16);
-    imei += (((uint64_t) element_p->imei[5]) << 8);
-    imei += (((uint64_t) element_p->imei[6]));
+    // uint64_t imei = 0L;
+    // imei += (((uint64_t) element_p->imei[0]) << 48);
+    // imei += (((uint64_t) element_p->imei[1]) << 40);
+    // imei += (((uint64_t) element_p->imei[2]) << 32);
+    // imei += (((uint64_t) element_p->imei[3]) << 24);
+    // imei += (((uint64_t) element_p->imei[4]) << 16);
+    // imei += (((uint64_t) element_p->imei[5]) << 8);
+    // imei += (((uint64_t) element_p->imei[6]));
     
-    uint16_t fw = (element_p->fw[0] << 8);
-    fw += (element_p->fw[1]);
+    // uint16_t fw = (element_p->fw[0] << 8);
+    // fw += (element_p->fw[1]);
 
-    uint16_t count = (element_p->counter[0] << 8);
-    count += element_p->counter[1];
+    // uint16_t count = (element_p->counter[0] << 8);
+    // count += element_p->counter[1];
 
-    uint32_t timestamp = (element_p->timestamp[0] << 24);
-    timestamp += (element_p->timestamp[1] << 16);
-    timestamp += (element_p->timestamp[2] << 8);
-    timestamp += (element_p->timestamp[3]);
+    // uint32_t timestamp = (element_p->timestamp[0] << 24);
+    // timestamp += (element_p->timestamp[1] << 16);
+    // timestamp += (element_p->timestamp[2] << 8);
+    // timestamp += (element_p->timestamp[3]);
 
-    uint32_t loraId = (element_p->loraID[0] << 16);
-    loraId += (element_p->loraID[1] << 8);
-    loraId += (element_p->loraID[2]);
-    uint16_t battery = (element_p->batteryVoltage[0] << 8);
-    battery += element_p->batteryVoltage[1];
-    uint16_t flags = (element_p->flags.asArray[0] << 8);
-    flags += (element_p->flags.asArray[1]);
+    // uint32_t loraId = (element_p->loraID[0] << 16);
+    // loraId += (element_p->loraID[1] << 8);
+    // loraId += (element_p->loraID[2]);
+    // uint16_t battery = (element_p->batteryVoltage[0] << 8);
+    // battery += element_p->batteryVoltage[1];
+    // uint16_t flags = (element_p->flags.asArray[0] << 8);
+    // flags += (element_p->flags.asArray[1]);
 
-    if(gsmTxRes.lastErr != ESP_OK)
-    {
-        ESP_LOGE(TAG, "GSM error [%d] %s at state: %s", gsmTxRes.lastErr,
-                    esp_err_to_name(gsmTxRes.lastErr), printState(gsmTxRes.lastState));
+    // if(gsmTxRes.lastErr != ESP_OK)
+    // {
+    //     ESP_LOGE(TAG, "GSM error [%d] %s at state: %s", gsmTxRes.lastErr,
+    //                 esp_err_to_name(gsmTxRes.lastErr), printState(gsmTxRes.lastState));
 
-        element_p->flags.asBit.online = 0;
-        element_p->loraID[2] = (gsmTxRes.lastErr)>>8;
-        element_p->loraID[1] = gsmTxRes.lastErr & 0xff;
-        element_p->loraID[0] = gsmTxRes.lastState;
+    //     element_p->flags.asBit.online = 0;
+    //     element_p->loraID[2] = (gsmTxRes.lastErr)>>8;
+    //     element_p->loraID[1] = gsmTxRes.lastErr & 0xff;
+    //     element_p->loraID[0] = gsmTxRes.lastState;
 
-        element_p->crc = 0;
-        uint8_t crc_calc = crc8_itu((uint8_t *)hexArray, hexArrayLen);
-        element_p->crc = crc_calc;
-        memset(gsmTxRes.base64, 0, sizeof(gsmTxRes.base64));
-        mbedtls_base64_encode((unsigned char *)gsmTxRes.base64, sizeof(gsmTxRes.base64), &encodedLen, (unsigned char *)hexArray, hexArrayLen);
-        uint32_t id;
-        gsmTxRes.base64[gsmTxRes.size] = 0x00;
-        esp_err_t err = storage_gsm_save_position(gsmTxRes.base64, &id);
-        ESP_LOGW(TAG, "Store GSM_POS status [%d] %s -> [%ld] %s", err, esp_err_to_name(err), id, gsmTxRes.base64);
-    }
-    else
-    {
-        ESP_LOGI(TAG, "GSM SENT ");
-    }
-    printf("[PARSE] header: %d | sn: %llu | imei: %llu | fw: %04X | hw: %d\r\n",
-                element_p->header, serialNumber, imei, fw, element_p->hw);
+    //     element_p->crc = 0;
+    //     uint8_t crc_calc = crc8_itu((uint8_t *)hexArray, hexArrayLen);
+    //     element_p->crc = crc_calc;
+    //     memset(gsmTxRes.base64, 0, sizeof(gsmTxRes.base64));
+    //     mbedtls_base64_encode((unsigned char *)gsmTxRes.base64, sizeof(gsmTxRes.base64), &encodedLen, (unsigned char *)hexArray, hexArrayLen);
+    //     uint32_t id;
+    //     gsmTxRes.base64[gsmTxRes.size] = 0x00;
+    //     esp_err_t err = storage_gsm_save_position(gsmTxRes.base64, &id);
+    //     ESP_LOGW(TAG, "Store GSM_POS status [%d] %s -> [%ld] %s", err, esp_err_to_name(err), id, gsmTxRes.base64);
+    // }
+    // else
+    // {
+    //     ESP_LOGI(TAG, "GSM SENT ");
+    // }
+    // printf("[PARSE] header: %d | sn: %llu | imei: %llu | fw: %04X | hw: %d\r\n",
+    //             element_p->header, serialNumber, imei, fw, element_p->hw);
     
-    printf("\t proto: %02X | counter: %d | timestamp: %ld | type: %d | loraId: %ld\r\n",
-                element_p->protocol, count, timestamp, element_p->type, loraId);
-    printf("\t temp: %d | battery: %d | crc: %d | flags: %04X | reset: %d | #erbs: %d\r\n",
-                element_p->temp, battery, element_p->crc, flags, element_p->lastRst, element_p->n_erbs);
+    // printf("\t proto: %02X | counter: %d | timestamp: %ld | type: %d | loraId: %ld\r\n",
+    //             element_p->protocol, count, timestamp, element_p->type, loraId);
+    // printf("\t temp: %d | battery: %d | crc: %d | flags: %04X | reset: %d | #erbs: %d\r\n",
+    //             element_p->temp, battery, element_p->crc, flags, element_p->lastRst, element_p->n_erbs);
                 
     // state = SM_WAIT_FOR_EVENT;
 }

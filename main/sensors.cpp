@@ -135,7 +135,7 @@ void sensorsTask(void* parameter)
     ESP_ERROR_CHECK(esp_timer_create(&debounceMovingArgs, &debounceMovingTimer));
     ESP_ERROR_CHECK(esp_timer_create(&debounceStoppingArgs, &debounceStoppingTimer));
 
-    dev_i2c.begin(PIN_NUM_SDA, PIN_NUM_SCL, 100000);
+    dev_i2c.begin(PIN_NUM_SDA, PIN_NUM_SCL, 400000);
     Acc.begin();
     Acc.Enable_X();
 
