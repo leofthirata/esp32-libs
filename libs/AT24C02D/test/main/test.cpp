@@ -72,7 +72,8 @@ void otp_read_no_crc(OTPMemoryUnion_t *memoryRead)
         {
             printf("corrupted data %d, trying again\r\n", k);
             k--;
-            delay(30);
+            // delay(30);
+            vTaskDelay(pdMS_TO_TICKS(30));
         }
     }
 
@@ -84,8 +85,8 @@ void otp_read_no_crc(OTPMemoryUnion_t *memoryRead)
 
     memcpy(memoryRead, parseData.asArray, sizeof(parseData.asArray));
 
-    printf("    [PARSE] memVer: %d | hwVer: %d | prefixSN: %d \r\n", parseData.asParam.memVer,
-            parseData.asParam.hwVer, parseData.asParam.prefixSN);
+    printf("    [PARSE] memVer: %d | hwVer: %d | prefixSN: %d \r\n", (int)parseData.asParam.memVer,
+            (int)parseData.asParam.hwVer, (int)parseData.asParam.hwVer);
     uint32_t loraIDDec =  (parseData.asParam.loraID[0] << 16) + (parseData.asParam.loraID[1] << 8) + 
         (parseData.asParam.loraID[2]);
     printf("        loraID: 0x%02X 0x%02X 0x%02X = %ld\r\n", parseData.asParam.loraID[0], 
@@ -230,7 +231,7 @@ extern "C" void app_main(void)
     {
         memcpy(&otpCrc[i*8], &otp.asArray[i*7], 7);
         otpCrc[(i+1)*7+i] = dallas_crc8(&(otp.asArray[i*7]), 7);
-        printf("otpCrc = %d", dallas_crc8(&(otp.asArray[i*7]), 7));
+        printf("otpCrc = %d\r\n", dallas_crc8(&(otp.asArray[i*7]), 7));
     }
     ESP_LOG_BUFFER_HEX("otpCrc", otpCrc, 72);
 
