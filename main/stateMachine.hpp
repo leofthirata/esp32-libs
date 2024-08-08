@@ -1,8 +1,5 @@
 #ifndef __STATEMACHINE_HPP__
 #define __STATEMACHINE_HPP__
-// #ifdef __cplusplus
-// extern "C" {
-// #endif
 
 #include "main.h"
 #include "esp_event.h"
@@ -37,7 +34,6 @@ typedef enum {
 
 
 void changeTime(TimeType_t type, uint32_t time);
-uint8_t dallas_crc8(const uint8_t *pdata, const uint32_t size);
 
 typedef enum {
 	SM_WAIT_FOR_EVENT = 0,
@@ -154,8 +150,5 @@ typedef union
 } PositionP2PUnion_t;
 
 #pragma pack()
-// #ifdef __cplusplus
-// }
-// #endif
 
 #endif //__STATEMACHINE_HPP__

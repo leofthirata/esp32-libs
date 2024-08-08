@@ -40,9 +40,8 @@ esp_timer_handle_t debounceMovingTimer, debounceStoppingTimer;
 static int64_t timeLastAccChanged, timerStopping;
 static const char* TAG = "sensors";
 
-
-// TwoWire dev_i2c(0);  
-LIS2DW12Sensor Acc(I2C_NUM_0, GPIO_NUM_27, GPIO_NUM_26);
+TwoWire dev_i2c(0);  
+LIS2DW12Sensor Acc(&dev_i2c, LIS2DW12_I2C_ADD_L);
 
 static bool adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t *out_handle)
 {
@@ -135,7 +134,7 @@ void sensorsTask(void* parameter)
     ESP_ERROR_CHECK(esp_timer_create(&debounceMovingArgs, &debounceMovingTimer));
     ESP_ERROR_CHECK(esp_timer_create(&debounceStoppingArgs, &debounceStoppingTimer));
 
-    // dev_i2c.begin(PIN_NUM_SDA, PIN_NUM_SCL, 400000);
+    dev_i2c.begin(PIN_NUM_SDA, PIN_NUM_SCL, 400000);
     Acc.begin();
     Acc.Enable_X();
 

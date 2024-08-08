@@ -107,6 +107,7 @@ esp_err_t EEPROM::init(i2c_port_t port, int sda, int scl, int wp, bool wpEnable)
         ESP_LOGE(TAG, "%s (%s)", __func__, esp_err_to_name(err));
     }
 
+    printf("port %d | mode %d \r\n", m_port, m_mode);
 	err = i2c_driver_install(m_port, m_mode, 0, 0, 0);
     if (err != ESP_OK)
     {

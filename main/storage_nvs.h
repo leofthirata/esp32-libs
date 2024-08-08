@@ -1,5 +1,5 @@
-#ifndef __MEMORY_H__
-#define __MEMORY_H__
+#ifndef __STORAGE_NVS_H__
+#define __STORAGE_NVS_H__
 
 /******************************************************************************
  * Copyright © 2008 - 2024, F&K Group. All rights reserved.
@@ -145,4 +145,4 @@ esp_err_t storage_gsm_erase_nvs();
 #ifdef __cplusplus
 }
 #endif
-#endif //__MEMORY_H__
+#endif //__STORAGE_NVS_H__

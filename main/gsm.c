@@ -10,9 +10,9 @@
 #include "stateMachine.hpp"
 #include "gsm.h"
 #include "mbedtls/base64.h"
-#include "memory.h"
+#include "storage_nvs.h"
 #include "esp_timer.h"
-
+#include "utils.h"
 static const char *TAG = "gsmTask";
 
 #define GPIO_PIN_SEL(pin) (1ULL << pin)
@@ -115,25 +115,6 @@ void config_pwrkey_gpio(void)
 
     gpio_set_level(GPIO_OUTPUT_POWER_ON, false);
     gpio_set_level(GPIO_OUTPUT_PWRKEY, false);
-}
-
-//  https://github.com/whik/crc-lib-c/blob/master/crcLib.c
-uint8_t crc8_itu(uint8_t *data, uint16_t length)
-{
-    uint8_t i;
-    uint8_t crc = 0; // Initial value
-    while (length--)
-    {
-        crc ^= *data++; // crc ^= *data; data++;
-        for (i = 0; i < 8; i++)
-        {
-            if (crc & 0x80)
-                crc = (crc << 1) ^ 0x07;
-            else
-                crc <<= 1;
-        }
-    }
-    return crc ^ 0x55;
 }
 
 char *generate_position_hex(mdm_lbs_cell_t *cells, GSMTxPayload_t *_data, size_t *size)

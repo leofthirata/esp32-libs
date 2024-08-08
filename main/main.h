@@ -30,6 +30,15 @@
 
 #define PIN_NUM_GSM_NETLIGHT 37
 
+#define SIO 12 // AT21CS01 connected to
+               // External pull-up NOT REQUIRED!
+
+#define PIN_SDA_GPIO GPIO_NUM_27
+#define PIN_SCL_GPIO GPIO_NUM_26
+#define PIN_WP_GPIO GPIO_NUM_12
+
+#define I2C_FREQUENCY   400000
+
 #define SCHED_MAX_EVENT_DATA_SIZE APP_TIMER_SCHED_EVENT_DATA_SIZE /**< Maximum size of scheduler events. */
 #define SCHED_QUEUE_SIZE 60										  /**< Maximum number of events in the scheduler queue. */
 

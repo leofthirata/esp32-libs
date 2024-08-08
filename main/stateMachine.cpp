@@ -5,7 +5,8 @@
 #include "gsm.h"
 #include "sys/time.h"
 #include "mbedtls/base64.h"
-#include "memory.h"
+#include "storage_nvs.h"
+#include "utils.h"
 
 static Isca_t *m_isca;
 static bool resetRequested = false;
@@ -45,25 +46,6 @@ ESP_EVENT_DECLARE_BASE(APP_EVENT);
 
 void stopTimers();
 void lorawanRX(LoRaLRWRx_t* _lrwRx);
-
-uint8_t dallas_crc8(const uint8_t *pdata, const uint32_t size)
-{
-	uint8_t crcr = 0;
-	for (uint32_t i = 0; i < size; ++i)
-	{
-		uint8_t inbyte = pdata[i];
-		for (uint8_t j = 0; j < 8; ++j)
-		{
-			uint8_t mix = (crcr ^ inbyte) & 0x01;
-			crcr >>= 1;
-			if (mix)
-				crcr ^= 0x8C;
-			inbyte >>= 1;
-		}
-	}
-	return crcr;
-}
-
 
 void setMachineState(Isca_SM_t new_state)
 {

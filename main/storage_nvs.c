@@ -18,7 +18,7 @@
  * @author Leonardo Hirata
  * @copyright F&K Group
  ******************************************************************************/
-#include "memory.h"
+#include "storage_nvs.h"
 #include "esp_err.h"
 
 static const char *TAG = "Storage";
@@ -101,7 +101,6 @@ esp_err_t storage_init()
 
 esp_err_t storage_deinit()
 {
-
     return ESP_OK;
 }
 

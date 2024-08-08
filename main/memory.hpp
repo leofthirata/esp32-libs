@@ -1,7 +1,8 @@
-#ifndef __OTP_HPP__
-#define __OTP_HPP__
+#ifndef __MEMORY_HPP__
+#define __MEMORY_HPP__
 
 #include "stdint.h"
+#include "main.h"
 
 typedef struct 
 {
@@ -14,10 +15,17 @@ typedef struct
     uint8_t appEUI[8];
     uint8_t nwSKey[16];
     uint8_t appSKey[16];
+    uint8_t bleMac[6];
+    uint8_t imei[7];
 } OTPMemory_t;
+
+#define AT24C02D_MEMORY_SIZE 256
+#define OTP_MEM_VER 0x01
+
+void taskMemory(void* pvParamters);
+void memoryInit(Isca_t *_m_isca);
 
 uint8_t otpInit(void *parameter);
 uint8_t otpRead(OTPMemory_t *memoryRead);
 
-#define OTP_MEM_VER 0x01
-#endif //__OTP_HPP__
+#endif //__MEMORY_HPP__
