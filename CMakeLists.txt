@@ -5,4 +5,4 @@ set(EXTRA_COMPONENT_DIRS "components/." "libs/." $ENV{IDF_PATH}/examples/system/
 # set(EXTRA_COMPONENT_DIRS "libs/.")
 # set(EXTRA_COMPONENT_DIRS $ENV{IDF_PATH}/examples/system/console/advanced/components)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(fk-isca)
+project(test-fw)

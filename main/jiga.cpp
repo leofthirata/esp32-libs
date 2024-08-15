@@ -8,7 +8,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "led.hpp"
-#include "lora.hpp"
 #include "esp_console.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -82,7 +81,7 @@ TaskHandle_t m_otp_task;
 TaskHandle_t m_acc_task;
 TaskHandle_t m_ble_task;
 TaskHandle_t m_r800c_task;
-TaskHandle_t m_lora_task;
+TaskHandle_t m_gsm_task;
 
 static GSMTxRes_t gsmTxRes;
 static TaskHandle_t xTaskToNotify = NULL;
@@ -93,7 +92,8 @@ bool is_gsm_port_ok = false;
 #define NGROK_SERVER "0.tcp.sa.ngrok.io"
 uint32_t ngrok_port = 0;
 
-static void _sendPosition();
+static void gsm_send_position();
+static void lrw_send_status();
 
 uint8_t dallas_crc8(const uint8_t *pdata, const uint32_t size)
 {
@@ -407,7 +407,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                         ESP_GATT_OK, &rsp);
             
-            _sendPosition();
+            gsm_send_position();
             esp_event_post(APP_EVENT, APP_EVENT_SEND_POS, NULL, NULL, 0);
             // xTaskNotify(m_otp_task, 0, eSetValueWithOverwrite);
             break;
@@ -574,7 +574,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
-static void _sendPosition()
+static void gsm_send_position()
 {
     static uint16_t counter = 0;
     static GSMTxReq_t gsmTx;
@@ -652,7 +652,7 @@ void otp_task(void *parameter)
 
     printf("\r\n**********JIGA ISCA OTP BEGIN**********\r\n");
 
-    vTaskDelete(m_ble_task);
+    vTaskDelete(m_gsm_task);
 
     uint32_t idx = 0;
 
@@ -747,13 +747,100 @@ void otp_task(void *parameter)
     // write otp with crc every 7 bytes
     err = dev->at24c02d_write_byte(0x00, otpCrc, 82);
 
-    uint8_t temp256[256];
-    err = dev->at24c02d_read_byte(0x00, temp256, 256);
-    if (err != ESP_OK)
+    // uint8_t temp256[256];
+    // err = dev->at24c02d_read_byte(0x00, temp256, 256);
+    // if (err != ESP_OK)
+    // {
+    //     ESP_LOGE(TAG, "at24c02d_read_byte fail %s", esp_err_to_name(err));
+    // }
+    // ESP_LOG_BUFFER_HEX("temp256", temp256, sizeof(temp256));
+
+    uint8_t readFromMemory[88];
+    memset(readFromMemory, 0, sizeof(readFromMemory));
+    OTPMemory_t parseData;
+    uint8_t *parseData_p = (uint8_t *)&parseData;
+    uint8_t count = 0;
+
+    for (int k = 0; k < 11; k++)
     {
-        ESP_LOGE(TAG, "at24c02d_read_byte fail %s", esp_err_to_name(err));
+        dev->at24c02d_read_byte(k * 8, (&readFromMemory[k * 8]), 8);
+        ESP_LOG_BUFFER_HEX("readFromMemory", &readFromMemory[k * 8], 8);
+        if (k == 10)
+        {
+            uint8_t crc_cal = dallas_crc8(&(readFromMemory[k * 8]), 1);
+            if (crc_cal != (readFromMemory[k * 8 + 1]))
+            {
+                printf("corrupted data %d crc_calc:%02X crc_mem: %02X, trying again\r\n", k,
+                    crc_cal, readFromMemory[k * 8 + 1]);
+            }
+        }
+        else
+        {
+            uint8_t crc_cal = dallas_crc8(&(readFromMemory[k * 8]), 7);
+            if (crc_cal != (readFromMemory[k * 8 + 7]))
+            {
+                printf("corrupted data %d crc_calc:%02X crc_mem: %02X, trying again\r\n", k,
+                    crc_cal, readFromMemory[k * 8 + 7]);
+                k--;
+                count++;
+                vTaskDelay(pdMS_TO_TICKS(3000));
+            }
+            if (count >= 5)
+            {
+                printf("\r\n**********JIGA ISCA OTP FAILED TO READ**********\r\n");
+                break;
+            }
+        }
     }
-    ESP_LOG_BUFFER_HEX("temp256", temp256, sizeof(temp256));
+
+    for (int i = 0; i < 10; i++)
+    {
+        memcpy((parseData_p + (i * 7)), (&readFromMemory[i * 8]), 7);
+    }
+    memcpy((parseData_p + 70), &readFromMemory[80], 1);
+
+    uint8_t memoryRead[71];
+
+    memcpy(memoryRead, parseData_p, sizeof(OTPMemory_t));
+
+    printf("    [PARSE] memVer: %d | hwVer: %d | prefixSN: %d \r\n", parseData.memVer,
+           parseData.hwVer, parseData.prefixSN);
+    uint32_t loraIDDec = (parseData.loraID[0] << 16) + (parseData.loraID[1] << 8) +
+                         (parseData.loraID[2]);
+    printf("        loraID: 0x%02X 0x%02X 0x%02X = %ld\r\n", parseData.loraID[0],
+           parseData.loraID[1], parseData.loraID[2], loraIDDec);
+    printf("        devAddress: 0x%02X 0x%02X 0x%02X 0x%02X\r\n", parseData.devAddr[0],
+           parseData.devAddr[1], parseData.devAddr[2], parseData.devAddr[3]);
+    printf("        devEUI: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X\r\n", parseData.devEUI[0],
+           parseData.devEUI[1], parseData.devEUI[2], parseData.devEUI[3], parseData.devEUI[4],
+           parseData.devEUI[5], parseData.devEUI[6], parseData.devEUI[7]);
+    printf("        appEUI: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X\r\n", parseData.appEUI[0],
+           parseData.appEUI[1], parseData.appEUI[2], parseData.appEUI[3], parseData.appEUI[4],
+           parseData.appEUI[5], parseData.appEUI[6], parseData.appEUI[7]);
+    printf("        nwSKey: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X\r\n", parseData.nwSKey[0],
+           parseData.nwSKey[1], parseData.nwSKey[2], parseData.nwSKey[3], parseData.nwSKey[4],
+           parseData.nwSKey[5], parseData.nwSKey[6], parseData.nwSKey[7], parseData.nwSKey[8],
+           parseData.nwSKey[9], parseData.nwSKey[10], parseData.nwSKey[11], parseData.nwSKey[12],
+           parseData.nwSKey[13], parseData.nwSKey[14], parseData.nwSKey[15]);
+    printf("        appSKey: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X\r\n", parseData.appSKey[0],
+           parseData.appSKey[1], parseData.appSKey[2], parseData.appSKey[3], parseData.appSKey[4],
+           parseData.appSKey[5], parseData.appSKey[6], parseData.appSKey[7], parseData.appSKey[8],
+           parseData.appSKey[9], parseData.appSKey[10], parseData.appSKey[11], parseData.appSKey[12],
+           parseData.appSKey[13], parseData.appSKey[14], parseData.appSKey[15]);
+    printf("        mac: %02X:%02X:%02X:%02X:%02X:%02X\r\n", parseData.bleMac[0], parseData.bleMac[1],
+            parseData.bleMac[2],parseData.bleMac[3], parseData.bleMac[4], parseData.bleMac[5]);
+    
+    uint64_t _imei = 0L;
+        _imei += (((uint64_t) parseData.imei[0])<<48);
+        _imei += (((uint64_t) parseData.imei[1])<<40);
+        _imei += (((uint64_t) parseData.imei[2])<<32);
+        _imei += (((uint64_t) parseData.imei[3])<<24);
+        _imei += (((uint64_t) parseData.imei[4])<<16);
+        _imei += (((uint64_t) parseData.imei[5])<<8);
+        _imei += (((uint64_t) parseData.imei[6]));
+
+    printf("        imei: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X = %lld\r\n", parseData.imei[0], parseData.imei[1],
+            parseData.imei[2], parseData.imei[3], parseData.imei[4], parseData.imei[5], parseData.imei[6], _imei);
 
     dev->deinit();
 
@@ -764,11 +851,11 @@ void otp_task(void *parameter)
 
 void acc_task(void *parameter)
 {
-    uint32_t event = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // uint32_t event = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
     printf("\r\n**********JIGA ISCA ACC BEGIN**********\r\n");
 
-    vTaskDelete(m_otp_task);
+    // vTaskDelete(m_otp_task);
 
     uint32_t acc_unchanged = 0;
     uint32_t acc_zeroed = 0;
@@ -837,7 +924,7 @@ void acc_task(void *parameter)
 
     printf("\r\n**********JIGA ISCA ACC DONE**********\r\n");
 
-    xTaskNotify(m_ble_task, 0, eSetValueWithOverwrite);
+    // xTaskNotify(m_ble_task, 0, eSetValueWithOverwrite);
 
     while (1)
         vTaskDelay(500);
@@ -909,8 +996,8 @@ void ble_task(void *parameter)
     {
         Serial.printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
                     mac[0], mac[1], mac[2],
-                    mac[3], mac[4], mac[5]);
-
+                    mac[3], mac[4], mac[5] + 2);
+        mac[5] = mac[5] + 2;
         memcpy(otp.asParam.bleMac, mac, 6);
     } 
     else     
@@ -1004,7 +1091,7 @@ void r800c_task(void *parameter)
 
         esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
 
-        xTaskCreate(gsmTask, "gsmTask", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), NULL);
+        xTaskCreate(gsmTask, "gsm_task", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
     }
     else
     {
@@ -1012,22 +1099,6 @@ void r800c_task(void *parameter)
     }
 
     vTaskDelete(NULL);
-}
-
-void lora_task(void *parameter)
-{
-    uint32_t event = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-    printf("\r\n**********JIGA ISCA LORA BEGIN**********\r\n");
-
-    vTaskDelete(m_r800c_task);
-
-    while (1)
-    {
-        vTaskDelay(500);
-    }
-
-    printf("\r\n**********JIGA ISCA LORA BEGIN**********\r\n");
 }
 
 // serial waits for gsm port before starting everything
@@ -1100,10 +1171,10 @@ void setup()
     memcpy(&m_config.config.gsm.apn, GSM_APN, strlen(GSM_APN));
     memcpy(&m_config.config.gsm.server, NGROK_SERVER, strlen(NGROK_SERVER));
 
-    // xTaskCreate(acc_task, "acc_task", 4096, (void *)&m_config, 5, &m_acc_task);
-    xTaskCreate(r800c_task, "r800c_task", 4096, (void *)&m_config, 5, &m_r800c_task);
-    xTaskCreate(ble_task, "ble_task", 4096, (void *)&m_config, 5, &m_ble_task);
-    xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 5, &m_otp_task);
+    xTaskCreate(acc_task, "acc_task", 4096, (void *)&m_config, 5, &m_acc_task);
+    // xTaskCreate(r800c_task, "r800c_task", 4096, (void *)&m_config, 5, &m_r800c_task);
+    // xTaskCreate(ble_task, "ble_task", 4096, (void *)&m_config, 5, &m_ble_task);
+    // xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 5, &m_otp_task);
 }
 
 void loop()

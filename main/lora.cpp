@@ -273,7 +273,7 @@ void loraTask(void* param)
 	xQueueSendP2P = xQueueCreate(5, sizeof(LoRaP2PReq_t));
 	xQueueSendLRW = xQueueCreate(5, sizeof(LoRaLRWTxReq_t));
 	
-	xTaskToNotify = xTaskGetCurrentTaskHandle();
+	// xTaskToNotify = xTaskGetCurrentTaskHandle();
 
 	// Define the HW configuration between MCU and SX126x
 	hwConfig.CHIP_TYPE = SX1262_CHIP;		  // Example uses an eByte E22 module with an SX1262
@@ -310,13 +310,13 @@ void loraTask(void* param)
 	lmh_setAppSKey(config->rom.appSKey);
 	lmh_setDevAddr(config->rom.devAddr);
 
-	_events.TxDone = _eventsTXDone;
-	_events.TxTimeout = _eventsTXTimeout;
-	_events.RxDone = _eventsRXDone;
-	_events.RxTimeout = _eventsRXTimeout;
-	_events.RxError = _eventsRXError;
+	// _events.TxDone = _eventsTXDone;
+	// _events.TxTimeout = _eventsTXTimeout;
+	// _events.RxDone = _eventsRXDone;
+	// _events.RxTimeout = _eventsRXTimeout;
+	// _events.RxError = _eventsRXError;
 
-	setLoRaEvents(&_events);
+	// setLoRaEvents(&_events);
 
 	// Initialize LoRaWan
 	err_code = lmh_init(&lora_callbacks, lora_param_init, false, CLASS_A, LORAMAC_REGION_AU915);
@@ -353,70 +353,70 @@ void loraTask(void* param)
 			case LORA_SM_WAIT_FOR_TIMEOUT:
 			{
 				state = LORA_SM_WAIT_FOR_SEND;
-                if(ulNotifiedValue == 0)
-				{
-					xTaskNotifyWait( pdFALSE, pdFALSE, &ulNotifiedValue, xMaxBlockTime );
-				}
+                // if(ulNotifiedValue == 0)
+				// {
+				// 	xTaskNotifyWait( pdFALSE, pdFALSE, &ulNotifiedValue, xMaxBlockTime );
+				// }
 				ESP_LOGI(TAG, "flags: %03lX | free xQueueTxLoRa = %d/%d", ulNotifiedValue, uxQueueSpacesAvailable(xQueueLoRa),LORA_TX_QUEUE_SIZE);
 
 				if( ( ulNotifiedValue & LORA_BIT_P2P_TX_DONE ) != 0 )
 				{
 					state = LORA_SM_P2P_TX_DONE;
-					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_TX_DONE );
+					//ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_TX_DONE );
                     ulNotifiedValue &= ~LORA_BIT_P2P_TX_DONE;
 				} 
 				else if((ulNotifiedValue & LORA_BIT_P2P_TX_TIMEOUT) != 0 )
 				{
 					state = LORA_SM_P2P_TX_TIMEOUT;
-					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_TX_TIMEOUT );
+					//ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_TX_TIMEOUT );
                     ulNotifiedValue &= ~LORA_BIT_P2P_TX_TIMEOUT;
 				} 
 				else if((ulNotifiedValue & LORA_BIT_P2P_RX_TIMEOUT) != 0 )
 				{
 					state = LORA_SM_P2P_RX_TIMEOUT;
-					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_RX_TIMEOUT );
+					//ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_RX_TIMEOUT );
                     ulNotifiedValue &= ~LORA_BIT_P2P_RX_TIMEOUT;
 				} 
 				else if((ulNotifiedValue & LORA_BIT_P2P_RX_DONE) != 0 )
 				{
 					state = LORA_SM_P2P_RX_DONE;
-					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_RX_DONE );
+					//ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_RX_DONE );
                     ulNotifiedValue &= ~LORA_BIT_P2P_RX_DONE;
 				} 
 				else if((ulNotifiedValue & LORA_BIT_P2P_RX_ERROR) != 0 )
 				{
 					state = LORA_SM_P2P_RX_ERROR;
-					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_RX_ERROR );
+					//ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_P2P_RX_ERROR );
                     ulNotifiedValue &= ~LORA_BIT_P2P_RX_ERROR;
 				} 
 				else if((ulNotifiedValue & LORA_BIT_LRW_TX_DONE) != 0 )
 				{
 					state = LORA_SM_LRW_TX_DONE;
-					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_TX_DONE );
+					//ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_TX_DONE );
                     ulNotifiedValue &= ~LORA_BIT_LRW_TX_DONE;
 				} 
 				else if((ulNotifiedValue & LORA_BIT_LRW_TX_TIMEOUT) != 0 )
 				{
 					state = LORA_SM_LRW_TX_TIMEOUT;
-					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_TX_TIMEOUT );
+					//ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_TX_TIMEOUT );
                     ulNotifiedValue &= ~LORA_BIT_LRW_TX_TIMEOUT;
 				} 
 				else if((ulNotifiedValue & LORA_BIT_LRW_RX_DONE) != 0 )
 				{	
 					state = LORA_SM_LRW_RX_DONE;
-					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_RX_DONE );
+					//ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_RX_DONE );
                     ulNotifiedValue &= ~LORA_BIT_LRW_RX_DONE;					
 				} 
 				else if((ulNotifiedValue & LORA_BIT_LRW_RX_TIMEOUT) != 0 )
 				{
 					state = LORA_SM_LRW_RX_TIMEOUT;
-					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_RX_TIMEOUT );
+					//ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_RX_TIMEOUT );
                     ulNotifiedValue &= ~LORA_BIT_LRW_RX_TIMEOUT;					
 				} 
 				else if((ulNotifiedValue & LORA_BIT_LRW_RX_ERROR) != 0 )
 				{
 					state = LORA_SM_LRW_RX_ERROR;
-					ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_RX_ERROR );
+					//ulTaskNotifyValueClear( xTaskToNotify, LORA_BIT_LRW_RX_ERROR );
                     ulNotifiedValue &= ~LORA_BIT_LRW_RX_ERROR;					
 				}
 
