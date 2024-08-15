@@ -56,8 +56,8 @@ typedef struct
 } task_data_t;
 
 QueueHandle_t _internal_queue;
-const char* printR800CNetlightStatus(NetlightStatus_t status);
-void power_on_modem()
+static const char* printR800CNetlightStatus(NetlightStatus_t status);
+static void power_on_modem()
 {
     R800CNetlight_t qElementNetlight;
     while (uxQueueSpacesAvailable(xQueueR800CNetlight) < NETLIGHT_QUEUE_SIZE)
@@ -77,7 +77,7 @@ void power_on_modem()
     vTaskDelay(pdMS_TO_TICKS(500));
 }
 
-void power_off_modem(esp_modem_dce_t *dce)
+static void power_off_modem(esp_modem_dce_t *dce)
 {
     char _response[512] = {};
     R800CNetlight_t qElementNetlight;
@@ -101,7 +101,7 @@ void power_off_modem(esp_modem_dce_t *dce)
     gpio_set_level(GPIO_OUTPUT_POWER_ON, false);
 }
 
-void config_pwrkey_gpio(void)
+static void config_pwrkey_gpio(void)
 {
     gpio_config_t io_conf = {}; // zero-initialize the config structure.
 
@@ -226,7 +226,7 @@ const char *printState(en_task_state state)
     return "unknown state";
 }
 
-const char* printR800CNetlightStatus(NetlightStatus_t status)
+static const char* printR800CNetlightStatus(NetlightStatus_t status)
 {
     switch(status)
     {
@@ -801,7 +801,7 @@ void gsmTask(void *pvParameters)
 
                 struct timeval current;
                 gettimeofday(&current, NULL);
-                printf(" Second : %llu \n Microsecond : %06lu\r\n",
+                printf("Second : %llu \nMicrosecond : %06lu\r\n",
                     current.tv_sec, current.tv_usec);
                 char buf[255];
                 strftime(buf, sizeof(buf), "%d %b %Y %H:%M:%S", &tm);
@@ -1058,6 +1058,11 @@ void gsmTask(void *pvParameters)
                                 printf("\t\t[GSM_RX]: %s\r\n\r\n", token);
                                 memcpy(&gsmRx.payload, token, size);
                                 gsmRx.size = size;
+
+                                if (strcmp(gsmRx.payload, gsmTxRes.base64) == 0)
+                                {
+                                    esp_event_post(APP_EVENT, APP_EVENT_JIGA, &gsmRx, sizeof(GSMRx_t), 0);
+                                }
                                 esp_event_post(APP_EVENT, APP_EVENT_GSM_RX, &gsmRx, sizeof(GSMRx_t), 0);
                             }
                         }

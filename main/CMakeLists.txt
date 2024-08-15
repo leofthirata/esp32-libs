@@ -1,2 +1,9 @@
-idf_component_register(SRCS "testWriteOTP.cpp" "led.cpp" "sensors.cpp" "lora.cpp" "stateMachine.cpp" "gsm.c" "memory.cpp" "storage_nvs.c" "utils.c" "testGetImei.c"
-                    INCLUDE_DIRS ".")
+idf_component_register(
+    SRCS 
+        "jiga.cpp" 
+        "led.cpp" 
+        "testGetImei.c"
+        "gsm.c"
+        "utils.c"
+    INCLUDE_DIRS 
+        ".")

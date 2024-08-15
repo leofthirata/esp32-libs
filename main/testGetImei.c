@@ -20,9 +20,9 @@
 static esp_timer_handle_t netlightTimer;
 static QueueHandle_t xQueueR800CNetlight;
 
-static const char *TAG = "getImei.cpp";
+static const char *TAG = "testGetImei.c";
 
-const char *printR800CNetlightStatus(NetlightStatus_t status)
+static const char *printR800CNetlightStatus(NetlightStatus_t status)
 {
     switch (status)
     {
@@ -45,7 +45,7 @@ const char *printR800CNetlightStatus(NetlightStatus_t status)
     return "ERROR";
 }
 
-void power_on_modem()
+static void power_on_modem()
 {
     R800CNetlight_t qElementNetlight;
     while (uxQueueSpacesAvailable(xQueueR800CNetlight) < NETLIGHT_QUEUE_SIZE)
@@ -65,7 +65,7 @@ void power_on_modem()
     vTaskDelay(pdMS_TO_TICKS(500));
 }
 
-void power_off_modem(esp_modem_dce_t *dce)
+static void power_off_modem(esp_modem_dce_t *dce)
 {
     char _response[512] = {};
     R800CNetlight_t qElementNetlight;
@@ -89,7 +89,7 @@ void power_off_modem(esp_modem_dce_t *dce)
     gpio_set_level(GPIO_OUTPUT_POWER_ON, false);
 }
 
-void config_pwrkey_gpio(void)
+static void config_pwrkey_gpio(void)
 {
     gpio_config_t io_conf = {}; // zero-initialize the config structure.
 

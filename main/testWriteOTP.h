@@ -1,0 +1,1 @@
+uint8_t dallas_crc8(const uint8_t *pdata, const uint32_t size);
