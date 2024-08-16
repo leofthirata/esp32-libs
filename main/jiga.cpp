@@ -4,7 +4,6 @@
 #include "Button.h"
 #include "AT24C02D/at24c02d.hpp"
 
-#include "sensors.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "led.hpp"
@@ -38,6 +37,11 @@
 #include "mbedtls/base64.h"
 #include "sys/time.h"
 
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+#include "driver/gpio.h"
+
 #define AT24C02D_MEMORY_SIZE 256
 #define CONFIG_SDA_GPIO GPIO_NUM_27
 #define CONFIG_SCL_GPIO GPIO_NUM_26
@@ -66,6 +70,22 @@ typedef union
 
 static OTPMemory_t readMemory;
 
+typedef enum: uint8_t
+{
+    BAT_ABSENT = 0,
+    BAT_DISCHARGING,
+    BAT_CHARGING,
+    BAT_CHARGED,
+} SensorsBatStatus_t;
+
+typedef struct
+{
+    uint8_t batStatus;
+    float temperature;
+    int batVoltage;
+    int32_t acc[3];
+} SensorsStatus_t;
+
 uint8_t mac[6];
 static const char *TAG = "jiga.cpp";
 
@@ -79,7 +99,6 @@ uint8_t rcvServerPort[6];
 
 TaskHandle_t m_otp_task;
 TaskHandle_t m_ble_task;
-TaskHandle_t m_r800c_task;
 TaskHandle_t m_gsm_task;
 
 static GSMTxRes_t gsmTxRes;
@@ -408,7 +427,6 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             
             gsm_send_position();
             esp_event_post(APP_EVENT, APP_EVENT_SEND_POS, NULL, NULL, 0);
-            // xTaskNotify(m_otp_task, 0, eSetValueWithOverwrite);
             break;
         }
         case ESP_GATTS_MTU_EVT:
@@ -923,10 +941,8 @@ void test_acc()
     printf("\r\n**********JIGA ISCA ACC DONE**********\r\n");
 }
 
-void ble_task(void *parameter)
+void ble_init()
 {
-    // uint32_t event = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
     printf("\r\n**********JIGA ISCA BLE BEGIN**********\r\n");
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
@@ -997,9 +1013,6 @@ void ble_task(void *parameter)
     {
         Serial.println("Failed to read MAC address");
     }
-
-    while (1)
-        vTaskDelay(500);
 }
 
 void serial_receive_gsm_port()
@@ -1041,6 +1054,7 @@ void serial_receive_gsm_port()
             idx = 0;
             memset(rcvServerPort, 0, 6);
         }
+        vTaskDelay(100);
     }
 
     m_config.config.gsm.port = ngrok_port;
@@ -1049,9 +1063,180 @@ void serial_receive_gsm_port()
     printf("\r\n**********JIGA ISCA R800C GSM PORT RECEIVED**********\r\n");
 }
 
-void r800c_task(void *parameter)
+const char* printBatStatus(SensorsBatStatus_t type)
 {
+    switch(type)
+    {
+        case BAT_ABSENT:
+            return "BAT_ABSENT";
+        case BAT_DISCHARGING:
+            return "BAT_DISCHARGING";
+        case BAT_CHARGING:
+            return "BAT_CHARGING";
+        case BAT_CHARGED:
+            return "BAT_CHARGED";
+        default:
+            break;
+    }
+    return "BAT_ERROR";
 }
+
+static bool adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t *out_handle)
+{
+    adc_cali_handle_t handle = NULL;
+    esp_err_t ret = ESP_FAIL;
+    bool calibrated = false;
+
+    if (!calibrated) {
+        ESP_LOGI(TAG, "calibration scheme version is %s", "Line Fitting");
+        adc_cali_line_fitting_config_t cali_config = {
+            .unit_id = unit,
+            .atten = atten,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            calibrated = true;
+        }
+    }
+
+    *out_handle = handle;
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Calibration Success");
+    } else if (ret == ESP_ERR_NOT_SUPPORTED || !calibrated) {
+        ESP_LOGW(TAG, "eFuse not burnt, skip software calibration");
+    } else {
+        ESP_LOGE(TAG, "Invalid arg or no memory");
+    }
+
+    return calibrated;
+}
+
+static void adc_calibration_deinit(adc_cali_handle_t handle)
+{
+    ESP_LOGI(TAG, "deregister %s calibration scheme", "Line Fitting");
+    ESP_ERROR_CHECK(adc_cali_delete_scheme_line_fitting(handle));
+}
+
+void adc_read(int voltage[3])
+{
+    gpio_config_t io_conf = {
+        .pin_bit_mask = 1ULL << PIN_BAT_ADC_CTRL,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+
+    adc_oneshot_unit_handle_t adc1_handle;
+    adc_oneshot_unit_init_cfg_t init_config1 = {
+        .unit_id = ADC_UNIT_1,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
+
+    //-------------ADC1 Config---------------//
+    adc_oneshot_chan_cfg_t config;
+    config.bitwidth = ADC_BITWIDTH_DEFAULT;
+    config.atten = ADC_ATTEN_DB_12;
+
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_0, &config));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_2, &config));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_4, &config));
+
+    //-------------ADC1 Calibration Init---------------//
+   
+    adc_cali_handle_t adc1_cali_chan0_handle = NULL;
+    adc_cali_handle_t adc1_cali_chan2_handle = NULL;
+    adc_cali_handle_t adc1_cali_chan4_handle = NULL;
+
+    bool do_calibration1_chan0 = adc_calibration_init(ADC_UNIT_1, ADC_CHANNEL_0, ADC_ATTEN_DB_12, &adc1_cali_chan0_handle);
+    bool do_calibration1_chan2 = adc_calibration_init(ADC_UNIT_1, ADC_CHANNEL_2, ADC_ATTEN_DB_12, &adc1_cali_chan2_handle);
+    bool do_calibration1_chan4 = adc_calibration_init(ADC_UNIT_1, ADC_CHANNEL_4, ADC_ATTEN_DB_12, &adc1_cali_chan4_handle);
+    char printLog[3][40] = {'0'};
+
+    SensorsStatus_t _sensorStatus;
+    int adc_raw[3];
+
+    gpio_set_direction(PIN_BAT_ADC_CTRL, GPIO_MODE_OUTPUT);
+    gpio_set_level(PIN_BAT_ADC_CTRL, 0);
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_0, &adc_raw[0]));
+    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_2, &adc_raw[1]));
+    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_4, &adc_raw[2]));
+    
+    gpio_set_direction(PIN_BAT_ADC_CTRL, GPIO_MODE_INPUT);
+
+    if (do_calibration1_chan0) 
+    {
+        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw[0], &voltage[0]));
+        sprintf(&printLog[0][0], "[BAT_ADC]: %d mV", 2*voltage[0]);
+    }
+    else
+    {
+        sprintf(&printLog[0][0], "BAT_ADC: 0x%03X", adc_raw[0]);
+    }
+
+
+    if (do_calibration1_chan2) 
+    {
+        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan2_handle, adc_raw[1], &voltage[1]));
+        sprintf(&printLog[1][0], "[BMS_CHR]: %d mV", voltage[1]);
+    }
+    else
+    {
+        sprintf(&printLog[1][0], "[BMS_CHR]: 0x%03X", adc_raw[1]);
+    }
+
+    if (do_calibration1_chan4) 
+    {
+        ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan4_handle, adc_raw[2], &voltage[2]));
+        sprintf(&printLog[2][0], "[BMS_DON]: %d mV", voltage[2]);
+    }
+    else
+    {
+        sprintf(&printLog[2][0], "[BMS_DON]: 0x%03X", adc_raw[2]);
+    }
+    
+    if(2*voltage[0] < 1000)
+    {
+        _sensorStatus.batStatus = BAT_ABSENT;
+    }
+    else if(voltage[1] > 1800 && voltage[2] > 1800)
+    {
+        _sensorStatus.batStatus = BAT_DISCHARGING;
+    }
+    else if(voltage[1] < 1800 && voltage[2] > 1800)
+    {
+        _sensorStatus.batStatus = BAT_CHARGING;
+    }
+    else if(voltage[1] > 1800 && voltage[2] < 1800)
+    {
+        _sensorStatus.batStatus = BAT_CHARGED;
+    }
+    else if(voltage[1] < 1800 && voltage[2] < 1800)
+    {
+    
+    }
+    
+    _sensorStatus.batVoltage = 2*voltage[0];
+
+    ESP_LOGW(TAG, "%s %s %s | batStatus:%s",
+            printLog[0], printLog[1], printLog[2], printBatStatus((SensorsBatStatus_t)_sensorStatus.batStatus));
+    
+    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
+
+    if (do_calibration1_chan0) 
+        adc_calibration_deinit(adc1_cali_chan0_handle);
+
+    if (do_calibration1_chan2) 
+        adc_calibration_deinit(adc1_cali_chan2_handle);
+
+    if (do_calibration1_chan4) 
+        adc_calibration_deinit(adc1_cali_chan4_handle);
+}
+
 
 // serial waits for gsm port before starting everything
 // test acc
@@ -1123,14 +1308,23 @@ void setup()
     memcpy(&m_config.config.gsm.apn, GSM_APN, strlen(GSM_APN));
     memcpy(&m_config.config.gsm.server, NGROK_SERVER, strlen(NGROK_SERVER));
 
+    // if bat voltage < 3 -> no batt found -> no gsm testing
+
+    int bat_voltage[3];
+    adc_read(bat_voltage);
+    if (bat_voltage[0]*2 > 3300)
+        printf("\r\n**********JIGA ISCA BATTERY FOUND**********\r\n");
+    else
+        printf("\r\n**********JIGA ISCA BATTERY NOT FOUND**********\r\n");
+
     test_acc();
     serial_receive_gsm_port();
+    ble_init();
 
     xTaskToNotify = xTaskGetCurrentTaskHandle();
     esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
     xTaskCreate(gsmTask, "gsm_task", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
 
-    xTaskCreate(ble_task, "ble_task", 4096, (void *)&m_config, 5, &m_ble_task);
     xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 5, &m_otp_task);
 }
 
