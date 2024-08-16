@@ -78,7 +78,6 @@ uint8_t rcv[62];
 uint8_t rcvServerPort[6];
 
 TaskHandle_t m_otp_task;
-TaskHandle_t m_acc_task;
 TaskHandle_t m_ble_task;
 TaskHandle_t m_r800c_task;
 TaskHandle_t m_gsm_task;
@@ -849,13 +848,9 @@ void otp_task(void *parameter)
     vTaskDelete(NULL);
 }
 
-void acc_task(void *parameter)
+void test_acc()
 {
-    // uint32_t event = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
     printf("\r\n**********JIGA ISCA ACC BEGIN**********\r\n");
-
-    // vTaskDelete(m_otp_task);
 
     uint32_t acc_unchanged = 0;
     uint32_t acc_zeroed = 0;
@@ -922,12 +917,9 @@ void acc_task(void *parameter)
         ESP_LOGE(TAG, "ERROR: TEMPERATURE RETURNED ZERO (%ld times).", temp_zeroed);
     }
 
+    i2c_driver_delete(I2C_NUM_0);
+
     printf("\r\n**********JIGA ISCA ACC DONE**********\r\n");
-
-    // xTaskNotify(m_ble_task, 0, eSetValueWithOverwrite);
-
-    while (1)
-        vTaskDelay(500);
 }
 
 void ble_task(void *parameter)
@@ -1171,10 +1163,11 @@ void setup()
     memcpy(&m_config.config.gsm.apn, GSM_APN, strlen(GSM_APN));
     memcpy(&m_config.config.gsm.server, NGROK_SERVER, strlen(NGROK_SERVER));
 
-    xTaskCreate(acc_task, "acc_task", 4096, (void *)&m_config, 5, &m_acc_task);
-    // xTaskCreate(r800c_task, "r800c_task", 4096, (void *)&m_config, 5, &m_r800c_task);
-    // xTaskCreate(ble_task, "ble_task", 4096, (void *)&m_config, 5, &m_ble_task);
-    // xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 5, &m_otp_task);
+    test_acc();
+
+    xTaskCreate(r800c_task, "r800c_task", 4096, (void *)&m_config, 5, &m_r800c_task);
+    xTaskCreate(ble_task, "ble_task", 4096, (void *)&m_config, 5, &m_ble_task);
+    xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 5, &m_otp_task);
 }
 
 void loop()
