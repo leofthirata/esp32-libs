@@ -719,6 +719,7 @@ void otp_task(void *parameter)
     memcpy(otp.asParam.appEUI, &rcv[20], 8);
     memcpy(otp.asParam.nwSKey, &rcv[28], 16);
     memcpy(otp.asParam.appSKey, &rcv[44], 16);
+    memcpy(otp.asParam.imei, m_config.rom.imei, 7);
 
     ESP_LOG_BUFFER_HEX("otp", otp.asArray, sizeof(OTPMemory_t)); // size 71
 
@@ -1003,6 +1004,8 @@ void ble_task(void *parameter)
 
 void serial_receive_gsm_port()
 {
+    printf("\r\n**********JIGA ISCA R800C BEGIN**********\r\n");
+
     uint32_t idx = 0;
 
     while (!is_gsm_port_ok)
@@ -1038,59 +1041,16 @@ void serial_receive_gsm_port()
             idx = 0;
             memset(rcvServerPort, 0, 6);
         }
-        vTaskDelay(100);
     }
-}
 
-void r800c_task(void *parameter)
-{
-    // uint32_t event = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-    printf("\r\n**********JIGA ISCA R800C BEGIN**********\r\n");
-
-    serial_receive_gsm_port();
     m_config.config.gsm.port = ngrok_port;
     // m_config.config.gsm.port = 11611;
 
     printf("\r\n**********JIGA ISCA R800C GSM PORT RECEIVED**********\r\n");
+}
 
-    esp_err_t err = getImei(otp.asParam.imei);
-
-    if (err == ESP_OK)
-    {
-        char print[30];
-        for(int k = 0; k < sizeof(otp.asParam.imei); k++)
-        {
-            sprintf(print+k*3, "%02X ", otp.asParam.imei[k]);   
-        }
-        print[21] = 0x00;
-        uint64_t imei;
-        imei = 0L;
-        imei += (((uint64_t) otp.asParam.imei[0])<<48);
-        imei += (((uint64_t) otp.asParam.imei[1])<<40);
-        imei += (((uint64_t) otp.asParam.imei[2])<<32);
-        imei += (((uint64_t) otp.asParam.imei[3])<<24);
-        imei += (((uint64_t) otp.asParam.imei[4])<<16);
-        imei += (((uint64_t) otp.asParam.imei[5])<<8);
-        imei += (((uint64_t) otp.asParam.imei[6]));
-        // memcpy(otp.asParam.imei, otp.asParam.imei, 7);
-        printf("imei: %lld | %s\r\n", imei, print);
-
-        uint32_t count = 0;
-        uint32_t ulNotifiedValue = 0;
-
-        xTaskToNotify = xTaskGetCurrentTaskHandle();
-
-        esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
-
-        xTaskCreate(gsmTask, "gsm_task", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
-    }
-    else
-    {
-        Serial.println("ERROR: R800C FAILED TO GET imei");
-    }
-
-    vTaskDelete(NULL);
+void r800c_task(void *parameter)
+{
 }
 
 // serial waits for gsm port before starting everything
@@ -1164,8 +1124,12 @@ void setup()
     memcpy(&m_config.config.gsm.server, NGROK_SERVER, strlen(NGROK_SERVER));
 
     test_acc();
+    serial_receive_gsm_port();
 
-    xTaskCreate(r800c_task, "r800c_task", 4096, (void *)&m_config, 5, &m_r800c_task);
+    xTaskToNotify = xTaskGetCurrentTaskHandle();
+    esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
+    xTaskCreate(gsmTask, "gsm_task", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
+
     xTaskCreate(ble_task, "ble_task", 4096, (void *)&m_config, 5, &m_ble_task);
     xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 5, &m_otp_task);
 }
