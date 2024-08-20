@@ -26,6 +26,7 @@
 
 #include "testGetImei.h"
 #include "gsm.h"
+#include "lora.hpp"
 
 #include "esp_bt.h"
 #include "esp_gap_ble_api.h"
@@ -86,6 +87,31 @@ typedef struct
     int32_t acc[3];
 } SensorsStatus_t;
 
+// typedef struct
+// {
+//     struct
+//     {
+//         uint8_t sequenceNumber : 5;
+//         uint8_t protocolVersion : 3;
+//     } header;
+//     uint8_t loraIdGw[3]; // lora id de quem vai enviar o comando
+//     uint8_t packetType;  // no caso de comandos sempre 0x41
+//     uint8_t crc8;
+//     uint8_t loraIdReceiveCommand[3];
+//     uint8_t param_desc1;
+//     uint8_t param_desc2;
+//     uint8_t param_desc3;
+//     uint8_t param_desc4;
+//     uint8_t loraEmergencyCommand;
+
+// } CommandP2P_t;
+
+// typedef union
+// {
+//     CommandP2P_t param;
+//     uint8_t array[sizeof(CommandP2P_t)];
+// } CommandP2PUnion_t;
+
 uint8_t mac[6];
 static const char *TAG = "jiga.cpp";
 
@@ -100,9 +126,11 @@ uint8_t rcvServerPort[6];
 TaskHandle_t m_otp_task;
 TaskHandle_t m_ble_task;
 TaskHandle_t m_gsm_task;
+TaskHandle_t m_lora_task;
 
 static GSMTxRes_t gsmTxRes;
 static TaskHandle_t xTaskToNotify = NULL;
+static LoRaP2PRx_t p2pRx;
 
 bool is_otp_ok = false;
 bool is_gsm_port_ok = false;
@@ -112,6 +140,8 @@ uint32_t ngrok_port = 0;
 
 static void gsm_send_position();
 static void lrw_send_status();
+static void lora_p2p_tx();
+static void lora_p2p_rx(LoRaP2PRx_t *_rx);
 
 uint8_t dallas_crc8(const uint8_t *pdata, const uint32_t size)
 {
@@ -425,8 +455,9 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                         ESP_GATT_OK, &rsp);
             
-            gsm_send_position();
-            esp_event_post(APP_EVENT, APP_EVENT_SEND_POS, NULL, NULL, 0);
+            // gsm_send_position();
+            lora_p2p_tx();
+            // esp_event_post(APP_EVENT, APP_EVENT_SEND_POS, NULL, NULL, 0);
             break;
         }
         case ESP_GATTS_MTU_EVT:
@@ -661,6 +692,15 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
     {
         xTaskNotify(m_otp_task, 0, eSetValueWithOverwrite);
     }
+    if (event_base == APP_EVENT && event_id == APP_EVENT_P2P_RX)
+    {
+        Serial.printf("************APP_EVENT_P2P_RX************");
+        LoRaP2PRx_t *p2pRx_p = (LoRaP2PRx_t*) event_data;
+        // memcpy(&p2pRx, p2pRx_p, sizeof(LoRaP2PRx_t));
+        // xQueueSend(xQueueP2PRx, &p2pRx, 0);
+        lora_p2p_rx(&p2pRx);
+    }
+
 }
 
 void otp_task(void *parameter)
@@ -1237,6 +1277,103 @@ void adc_read(int voltage[3])
         adc_calibration_deinit(adc1_cali_chan4_handle);
 }
 
+static void lora_p2p_rx(LoRaP2PRx_t *_rx)
+{
+    char payload[256];
+    for(int i = 0; i < _rx->payload.size; i++)
+    {
+        snprintf(&payload[i*3], 256, "%02X ", _rx->payload.buffer[i]);
+    }
+    payload[_rx->payload.size * 3] = 0x00;
+    printf("[LORA] P2P RCV: %s\r\n", payload);
+
+    if(_rx->payload.size == sizeof(CommandP2P_t))
+    {
+        CommandP2PUnion_t commandReceived;
+        memcpy(commandReceived.array, _rx->payload.buffer, _rx->payload.size);
+
+        uint8_t lCrc = commandReceived.param.crc8;
+        commandReceived.param.crc8 = 0;
+        uint8_t crcValidation = dallas_crc8(commandReceived.array, sizeof(CommandP2P_t));
+
+        if(crcValidation == lCrc)
+        {
+            uint32_t idLora = 0;
+            idLora += commandReceived.param.loraIdReceiveCommand[0];
+            idLora += (commandReceived.param.loraIdReceiveCommand[1] << 8);
+            idLora += (commandReceived.param.loraIdReceiveCommand[2] << 16);
+
+            if (idLora == m_config.rom.loraId)
+            {
+                printf("[LORA] Message for me from %02X%02X%02X | rssi: %d | srn: %d | ",
+                                            commandReceived.param.loraIdGw[2],
+                                            commandReceived.param.loraIdGw[1],
+                                            commandReceived.param.loraIdGw[0],
+                                            _rx->params.rssi, _rx->params.snr);
+
+                // if (commandReceived.param.loraEmergencyCommand)
+                // {
+                //     enterEmergency();
+                // }
+                // else
+                // {
+                //     exitEmergency();
+                // }
+            }
+            else
+            {
+                printf("[LORA] No P2P_RX for me =(\r\n");
+            }
+        }
+    }
+}
+
+static void lora_p2p_tx()
+{
+    LoRaP2PReq_t p2pTx;
+    static uint8_t counter = 0;
+    PositionP2PUnion_t pos;
+    memset(&pos, 0, sizeof(PositionP2PUnion_t));
+
+    float P2PBattery = (float)(m_config.status.batteryMiliVolts / 20.0);
+
+    pos.param.loraId[0] = (uint8_t) m_config.rom.loraId & 0xFFFFFF;
+    pos.param.loraId[1] = (uint8_t) (m_config.rom.loraId >> 8) & 0xFFFF;
+    pos.param.loraId[2] = (uint8_t) (m_config.rom.loraId >> 16) & 0xFF;
+    pos.param.packetType = 80;
+    pos.param.flags.headingGps = 511;
+    pos.param.flags.batteryVoltageInfos = 2;
+
+    pos.param.batteryVoltage = (uint8_t)(P2PBattery < 0 ? (P2PBattery - 0.5) : (P2PBattery + 0.5));;
+    pos.param.flags.accelerometerStatus = m_config.status.flags.asBit.movement;
+    pos.param.flags.criticalBatteryStatus = m_config.status.flags.asBit.lowBattery;
+    pos.param.flags.powerSupplyStatus = m_config.status.flags.asBit.powerSupply;
+    pos.param.flags.emergencyStatus = m_config.status.flags.asBit.emergency;
+    pos.param.header.sequenceNumber = counter;
+
+    m_config.status.P2PCount = counter;
+    if (counter++ > 63)
+        counter = 0;
+
+    pos.array[5] = dallas_crc8((const uint8_t*) (pos.array),
+    sizeof(PositionP2P_t));
+
+    memset(&p2pTx.payload.buffer, 0, sizeof(p2pTx.payload.buffer));
+    memcpy(&p2pTx.payload.buffer, pos.array, sizeof(PositionP2P_t));
+    p2pTx.payload.size = sizeof(PositionP2P_t);
+
+    p2pTx.params.txFreq = m_config.config.p2p.txFreq;
+    p2pTx.params.txPower = m_config.config.p2p.txPower;
+    p2pTx.params.BW = m_config.config.p2p.bw;
+    p2pTx.params.SF = m_config.config.p2p.sf;
+    p2pTx.params.CR = m_config.config.p2p.cr;
+    p2pTx.params.rxFreq = m_config.config.p2p.rxFreq;
+    p2pTx.params.rxDelay = m_config.config.p2p.rxDelay;
+    p2pTx.params.rxTimeout = m_config.config.p2p.rxTimeout;
+    p2pTx.params.txTimeout = m_config.config.p2p.txTimeout;
+    esp_event_post(APP_EVENT, APP_EVENT_P2P_TX_REQ, (void*)&p2pTx, sizeof(LoRaP2PReq_t), 0);
+}
+
 
 // serial waits for gsm port before starting everything
 // test acc
@@ -1318,14 +1455,15 @@ void setup()
         printf("\r\n**********JIGA ISCA BATTERY NOT FOUND**********\r\n");
 
     test_acc();
-    serial_receive_gsm_port();
+    // serial_receive_gsm_port();
     ble_init();
 
-    xTaskToNotify = xTaskGetCurrentTaskHandle();
+    // xTaskToNotify = xTaskGetCurrentTaskHandle();
     esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
-    xTaskCreate(gsmTask, "gsm_task", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
-
-    xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 5, &m_otp_task);
+    // xTaskCreate(gsmTask, "gsm_task", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
+    // xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 4, &m_otp_task);
+    xTaskCreate(loraTask, "lora_task", 4096, (void*) &m_config, 5, &m_lora_task);
+    xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &m_config, 6, NULL, 0);
 }
 
 void loop()

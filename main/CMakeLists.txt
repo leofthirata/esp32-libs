@@ -5,5 +5,7 @@ idf_component_register(
         "testGetImei.c"
         "gsm.c"
         "utils.c"
+        "lora.cpp"
+        "stateMachine.cpp"
     INCLUDE_DIRS 
         ".")

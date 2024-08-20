@@ -702,6 +702,7 @@ void stateTask (void* pvParameters)
 
             case SM_P2P_RX:
             {
+                printf("***********SM_P2P_RX***********");
                 LoRaP2PRx_t _rx;
                 if(xQueueReceive(xQueueP2PRx, &_rx, 10) == pdPASS)
                 {

@@ -118,10 +118,12 @@ void _eventsRXDone(bool isLRW, uint8_t *payload, uint16_t size, int16_t rssi, in
 {
 	if(isLRW)
 	{
+        printf("\r\n**********_eventsRXDone**********\r\n");
 		xTaskNotify(xTaskToNotify, LORA_BIT_LRW_RX_DONE, eSetBits);
 	}
 	else
 	{
+        printf("\r\n**********_eventsRXDone else**********\r\n");
 		//copy payload to LoRaElement_t structure
 		memcpy(&_p2pRx.payload.buffer, payload, size );
 		_p2pRx.payload.size = size;
@@ -250,6 +252,7 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
     }
     if (event_base == APP_EVENT && event_id == APP_EVENT_LRW_TX_REQ)
     {
+        Serial.printf("************APP_EVENT_LRW_TX_REQ************");
 		LoRaLRWTxReq_t *element_p = (LoRaLRWTxReq_t*) event_data;
 		LoRaLRWTxReq_t _lrwTx;
 		memcpy(&_lrwTx, element_p, sizeof(LoRaLRWTxReq_t));
@@ -273,7 +276,7 @@ void loraTask(void* param)
 	xQueueSendP2P = xQueueCreate(5, sizeof(LoRaP2PReq_t));
 	xQueueSendLRW = xQueueCreate(5, sizeof(LoRaLRWTxReq_t));
 	
-	// xTaskToNotify = xTaskGetCurrentTaskHandle();
+	xTaskToNotify = xTaskGetCurrentTaskHandle();
 
 	// Define the HW configuration between MCU and SX126x
 	hwConfig.CHIP_TYPE = SX1262_CHIP;		  // Example uses an eByte E22 module with an SX1262
@@ -310,13 +313,13 @@ void loraTask(void* param)
 	lmh_setAppSKey(config->rom.appSKey);
 	lmh_setDevAddr(config->rom.devAddr);
 
-	// _events.TxDone = _eventsTXDone;
-	// _events.TxTimeout = _eventsTXTimeout;
-	// _events.RxDone = _eventsRXDone;
-	// _events.RxTimeout = _eventsRXTimeout;
-	// _events.RxError = _eventsRXError;
+	_events.TxDone = _eventsTXDone;
+	_events.TxTimeout = _eventsTXTimeout;
+	_events.RxDone = _eventsRXDone;
+	_events.RxTimeout = _eventsRXTimeout;
+	_events.RxError = _eventsRXError;
 
-	// setLoRaEvents(&_events);
+	setLoRaEvents(&_events);
 
 	// Initialize LoRaWan
 	err_code = lmh_init(&lora_callbacks, lora_param_init, false, CLASS_A, LORAMAC_REGION_AU915);
@@ -476,7 +479,7 @@ void loraTask(void* param)
 					payload[p2pElement.payload.size * 3] = 0x00;
 					ESP_LOGI(TAG, "P2P SENT: %s", payload);
 
-					state = LORA_SM_WAIT_FOR_TIMEOUT;
+					state = LORA_SM_P2P_TX_DONE;
 				}
 				else
 				{
@@ -510,7 +513,6 @@ void loraTask(void* param)
 			case LORA_SM_P2P_RX_DONE:
 			{
 				// esp_event_post(APP_EVENT, APP_EVENT_P2P_RX, (void*)&_p2pRX, sizeof(loraP2PRXParam_t), 0);
-				
 				state_prev = LORA_SM_P2P_RX_DONE;
 				state = LORA_SM_WAIT_FOR_TIMEOUT;
 				break;
