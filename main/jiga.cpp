@@ -87,31 +87,6 @@ typedef struct
     int32_t acc[3];
 } SensorsStatus_t;
 
-// typedef struct
-// {
-//     struct
-//     {
-//         uint8_t sequenceNumber : 5;
-//         uint8_t protocolVersion : 3;
-//     } header;
-//     uint8_t loraIdGw[3]; // lora id de quem vai enviar o comando
-//     uint8_t packetType;  // no caso de comandos sempre 0x41
-//     uint8_t crc8;
-//     uint8_t loraIdReceiveCommand[3];
-//     uint8_t param_desc1;
-//     uint8_t param_desc2;
-//     uint8_t param_desc3;
-//     uint8_t param_desc4;
-//     uint8_t loraEmergencyCommand;
-
-// } CommandP2P_t;
-
-// typedef union
-// {
-//     CommandP2P_t param;
-//     uint8_t array[sizeof(CommandP2P_t)];
-// } CommandP2PUnion_t;
-
 uint8_t mac[6];
 static const char *TAG = "jiga.cpp";
 
@@ -127,6 +102,7 @@ TaskHandle_t m_otp_task;
 TaskHandle_t m_ble_task;
 TaskHandle_t m_gsm_task;
 TaskHandle_t m_lora_task;
+TaskHandle_t m_sm_task;
 
 static GSMTxRes_t gsmTxRes;
 static TaskHandle_t xTaskToNotify = NULL;
@@ -456,7 +432,8 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                                         ESP_GATT_OK, &rsp);
             
             // gsm_send_position();
-            lora_p2p_tx();
+            // lora_p2p_tx();
+            xTaskNotify(m_sm_task, 0x04, eSetBits);
             // esp_event_post(APP_EVENT, APP_EVENT_SEND_POS, NULL, NULL, 0);
             break;
         }
@@ -1427,7 +1404,7 @@ void setup()
     m_config.config.p2p.txPower = P2P_TX_POWER;
     m_config.config.p2p.rxFreq = P2P_CMD_FREQ;
     m_config.config.p2p.rxDelay = 0;
-    m_config.config.p2p.rxTimeout = P2P_RX_TIMEOUT;
+    m_config.config.p2p.rxTimeout = 10000;//P2P_RX_TIMEOUT;
     m_config.config.p2p.txTimeout = P2P_TX_TIMEOUT;
 
     m_config.config.lrw.confirmed = false;
@@ -1463,7 +1440,7 @@ void setup()
     // xTaskCreate(gsmTask, "gsm_task", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
     // xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 4, &m_otp_task);
     xTaskCreate(loraTask, "lora_task", 4096, (void*) &m_config, 5, &m_lora_task);
-    xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &m_config, 6, NULL, 0);
+    xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &m_config, 6, &m_sm_task, 0);
 }
 
 void loop()

@@ -542,11 +542,11 @@ void stateTask (void* pvParameters)
 
                 int64_t now = esp_timer_get_time();
 
-                ESP_LOGI(TAG, "flags: %02lX | Timeout P2P: %03llds | Timeout LRW: %03llds | Timeout GSM: %03llds", 
-                                ulNotifiedValue,
-                                (int64_t)((m_isca->status.P2PAlarm - now))/1000000, 
-                                (int64_t)((m_isca->status.LRWAlarm - now))/1000000,
-                                (int64_t)((m_isca->status.GSMAlarm - now))/1000000);
+                // ESP_LOGI(TAG, "flags: %02lX | Timeout P2P: %03llds | Timeout LRW: %03llds | Timeout GSM: %03llds", 
+                //                 ulNotifiedValue,
+                //                 (int64_t)((m_isca->status.P2PAlarm - now))/1000000, 
+                //                 (int64_t)((m_isca->status.LRWAlarm - now))/1000000,
+                //                 (int64_t)((m_isca->status.GSMAlarm - now))/1000000);
 
                 if(uxQueueSpacesAvailable(xQueueP2PRx) != QUEUE_P2P_RX_SIZE)
                 {
@@ -632,35 +632,57 @@ void stateTask (void* pvParameters)
             case SM_P2P_TX_REQ:
             {
                 static uint8_t counter = 0;
-                PositionP2PUnion_t pos;
-                memset(&pos, 0, sizeof(PositionP2PUnion_t));
+                // PositionP2PUnion_t pos;
+                // memset(&pos, 0, sizeof(PositionP2PUnion_t));
+
+                // float P2PBattery = (float)(m_isca->status.batteryMiliVolts / 20.0);
+
+                // pos.param.loraId[0] = (uint8_t) m_isca->rom.loraId & 0xFFFFFF;
+                // pos.param.loraId[1] = (uint8_t) (m_isca->rom.loraId >> 8) & 0xFFFF;
+                // pos.param.loraId[2] = (uint8_t) (m_isca->rom.loraId >> 16) & 0xFF;
+                // pos.param.packetType = 80;
+                // pos.param.flags.headingGps = 511;
+                // pos.param.flags.batteryVoltageInfos = 2;
+
+                // pos.param.batteryVoltage = (uint8_t)(P2PBattery < 0 ? (P2PBattery - 0.5) : (P2PBattery + 0.5));;
+                // pos.param.flags.accelerometerStatus = m_isca->status.flags.asBit.movement;
+                // pos.param.flags.criticalBatteryStatus = m_isca->status.flags.asBit.lowBattery;
+                // pos.param.flags.powerSupplyStatus = m_isca->status.flags.asBit.powerSupply;
+                // pos.param.flags.emergencyStatus = m_isca->status.flags.asBit.emergency;
+                // pos.param.header.sequenceNumber = counter;
+
+                // m_isca->status.P2PCount = counter;
+                // if (counter++ > 63)
+                //     counter = 0;
+
+                // pos.array[5] = dallas_crc8((const uint8_t*) (pos.array),
+                //     sizeof(PositionP2P_t));
+                
+                CommandP2PUnion_t cmd;
+                memset(&cmd, 0, sizeof(CommandP2PUnion_t));
 
                 float P2PBattery = (float)(m_isca->status.batteryMiliVolts / 20.0);
 
-                pos.param.loraId[0] = (uint8_t) m_isca->rom.loraId & 0xFFFFFF;
-                pos.param.loraId[1] = (uint8_t) (m_isca->rom.loraId >> 8) & 0xFFFF;
-                pos.param.loraId[2] = (uint8_t) (m_isca->rom.loraId >> 16) & 0xFF;
-                pos.param.packetType = 80;
-                pos.param.flags.headingGps = 511;
-                pos.param.flags.batteryVoltageInfos = 2;
+                cmd.param.loraIdGw[0] = (uint8_t) m_isca->rom.loraId & 0xFFFFFF;
+                cmd.param.loraIdGw[1] = (uint8_t) (m_isca->rom.loraId >> 8) & 0xFFFF;
+                cmd.param.loraIdGw[2] = (uint8_t) (m_isca->rom.loraId >> 16) & 0xFF;
+                cmd.param.packetType = 0x41;
+                cmd.param.loraIdReceiveCommand[2] = 0x45;
+                cmd.param.loraIdReceiveCommand[1] = 0x26;
+                cmd.param.loraIdReceiveCommand[0] = 0x4B;
+                cmd.param.header.sequenceNumber = 0x20;
+                cmd.param.param_desc1 = 0x01;
+                cmd.param.param_desc2 = 0x01;
+                cmd.param.param_desc3 = 0x00;
+                cmd.param.param_desc4 = 0x01;
+                cmd.param.loraEmergencyCommand = 0x00;
 
-                pos.param.batteryVoltage = (uint8_t)(P2PBattery < 0 ? (P2PBattery - 0.5) : (P2PBattery + 0.5));;
-                pos.param.flags.accelerometerStatus = m_isca->status.flags.asBit.movement;
-                pos.param.flags.criticalBatteryStatus = m_isca->status.flags.asBit.lowBattery;
-                pos.param.flags.powerSupplyStatus = m_isca->status.flags.asBit.powerSupply;
-                pos.param.flags.emergencyStatus = m_isca->status.flags.asBit.emergency;
-                pos.param.header.sequenceNumber = counter;
-
-                m_isca->status.P2PCount = counter;
-                if (counter++ > 63)
-                    counter = 0;
-
-                pos.array[5] = dallas_crc8((const uint8_t*) (pos.array),
-                    sizeof(PositionP2P_t));
-                
+                cmd.param.crc8 = dallas_crc8((const uint8_t*) (cmd.array),
+                        sizeof(CommandP2PUnion_t));
+                        
                 memset(&p2pTx.payload.buffer, 0, sizeof(p2pTx.payload.buffer));
-                memcpy(&p2pTx.payload.buffer, pos.array, sizeof(PositionP2P_t));
-                p2pTx.payload.size = sizeof(PositionP2P_t);
+                memcpy(&p2pTx.payload.buffer, cmd.array, sizeof(CommandP2P_t));
+                p2pTx.payload.size = sizeof(CommandP2P_t);
                 
                 p2pTx.params.txFreq = m_isca->config.p2p.txFreq;
                 p2pTx.params.txPower = m_isca->config.p2p.txPower;
@@ -909,16 +931,16 @@ void stateTask (void* pvParameters)
                 if(m_isca->status.flags.asBit.emergency)
                 {
                     stopTimers();
-                    updateP2PTimer(m_isca->timers.p2pStpEmer);
-                    updateLRWTimer(m_isca->timers.lrwStpEmer);
-                    updateGSMTimer(m_isca->timers.gsmStpEmer);
+                    // updateP2PTimer(m_isca->timers.p2pStpEmer);
+                    // updateLRWTimer(m_isca->timers.lrwStpEmer);
+                    // updateGSMTimer(m_isca->timers.gsmStpEmer);
                 }
                 else
                 {
                     stopTimers();
-                    updateP2PTimer(m_isca->timers.p2pStpNorm);
-                    updateLRWTimer(m_isca->timers.lrwStpNorm);
-                    updateGSMTimer(m_isca->timers.gsmStpNorm);
+                    // updateP2PTimer(m_isca->timers.p2pStpNorm);
+                    // updateLRWTimer(m_isca->timers.lrwStpNorm);
+                    // updateGSMTimer(m_isca->timers.gsmStpNorm);
 
                 }
                 state =SM_WAIT_FOR_EVENT;
