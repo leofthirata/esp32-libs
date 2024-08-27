@@ -431,9 +431,11 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                         ESP_GATT_OK, &rsp);
             
-            // gsm_send_position();
-            // lora_p2p_tx();
-            xTaskNotify(m_sm_task, 0x04, eSetBits);
+
+            if (!is_otp_ok)
+                gsm_send_position();
+            else
+                xTaskNotify(m_sm_task, 0x04, eSetBits);
             // esp_event_post(APP_EVENT, APP_EVENT_SEND_POS, NULL, NULL, 0);
             break;
         }
@@ -880,6 +882,8 @@ void otp_task(void *parameter)
     dev->deinit();
 
     printf("\r\n**********JIGA ISCA OTP DONE**********\r\n");
+
+    xTaskNotify(m_lora_task, 0, eSetValueWithOverwrite);
 
     vTaskDelete(NULL);
 }
@@ -1404,7 +1408,7 @@ void setup()
     m_config.config.p2p.txPower = P2P_TX_POWER;
     m_config.config.p2p.rxFreq = P2P_CMD_FREQ;
     m_config.config.p2p.rxDelay = 0;
-    m_config.config.p2p.rxTimeout = 10000;//P2P_RX_TIMEOUT;
+    m_config.config.p2p.rxTimeout = 1000;//10000;//P2P_RX_TIMEOUT;
     m_config.config.p2p.txTimeout = P2P_TX_TIMEOUT;
 
     m_config.config.lrw.confirmed = false;
@@ -1432,13 +1436,13 @@ void setup()
         printf("\r\n**********JIGA ISCA BATTERY NOT FOUND**********\r\n");
 
     test_acc();
-    // serial_receive_gsm_port();
+    serial_receive_gsm_port();
     ble_init();
 
-    // xTaskToNotify = xTaskGetCurrentTaskHandle();
+    xTaskToNotify = xTaskGetCurrentTaskHandle();
     esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
-    // xTaskCreate(gsmTask, "gsm_task", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
-    // xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 4, &m_otp_task);
+    xTaskCreate(gsmTask, "gsm_task", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
+    xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 4, &m_otp_task);
     xTaskCreate(loraTask, "lora_task", 4096, (void*) &m_config, 5, &m_lora_task);
     xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &m_config, 6, &m_sm_task, 0);
 }

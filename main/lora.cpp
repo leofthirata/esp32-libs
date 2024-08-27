@@ -261,6 +261,8 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
 
 void loraTask(void* param)
 {	
+    uint32_t event = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
 	Isca_t *config = (Isca_t*) param;
 	LoRaQueueElement_t loraQueueElement2Send = {.type = QUEUE_NONE};
     
@@ -322,11 +324,13 @@ void loraTask(void* param)
 	err_code = lmh_init(&lora_callbacks, lora_param_init, false, CLASS_A, LORAMAC_REGION_AU915);
 	if (err_code != 0)
 	{
-		Serial.printf("lmh_init failed - %ld\n", err_code);
+        printf("\r\n**********JIGA ISCA LORA FAILED - lmh_init failed: %ld**********\r\n", err_code);
 	}
 
 	// Start Join procedure
 	lmh_join();
+
+    printf("\r\n**********JIGA ISCA LORA BEGIN**********\r\n");
 
 	while(1)
     {
