@@ -666,16 +666,16 @@ void stateTask (void* pvParameters)
                 cmd.param.loraIdGw[0] = (uint8_t) m_isca->rom.loraId & 0xFFFFFF;
                 cmd.param.loraIdGw[1] = (uint8_t) (m_isca->rom.loraId >> 8) & 0xFFFF;
                 cmd.param.loraIdGw[2] = (uint8_t) (m_isca->rom.loraId >> 16) & 0xFF;
-                cmd.param.packetType = 0x41;
-                cmd.param.loraIdReceiveCommand[2] = 0x45;
-                cmd.param.loraIdReceiveCommand[1] = 0x26;
-                cmd.param.loraIdReceiveCommand[0] = 0x4B;
+                cmd.param.packetType = 0xFF;
+                cmd.param.loraIdReceiveCommand[2] = 0xFF;
+                cmd.param.loraIdReceiveCommand[1] = 0xFF;
+                cmd.param.loraIdReceiveCommand[0] = 0xFF;
                 cmd.param.header.sequenceNumber = 0x20;
                 cmd.param.param_desc1 = 0x01;
                 cmd.param.param_desc2 = 0x01;
                 cmd.param.param_desc3 = 0x00;
                 cmd.param.param_desc4 = 0x01;
-                cmd.param.loraEmergencyCommand = 0x00;
+                cmd.param.loraEmergencyCommand = 0x01;
 
                 cmd.param.crc8 = dallas_crc8((const uint8_t*) (cmd.array),
                         sizeof(CommandP2PUnion_t));
@@ -760,13 +760,13 @@ void stateTask (void* pvParameters)
                                                             commandReceived.param.loraIdGw[0],
                                                             _rx.params.rssi, _rx.params.snr);
 
-                                if (commandReceived.param.loraEmergencyCommand)
+                                if (commandReceived.param.loraEmergencyCommand && 
+                                        commandReceived.param.packetType == 0xFF && 
+                                        commandReceived.param.loraIdGw[0] == 0xFF &&
+                                        commandReceived.param.loraIdGw[1] == 0xFF &&
+                                        commandReceived.param.loraIdGw[2] == 0xFF)
                                 {
-                                    enterEmergency();
-                                }
-                                else
-                                {
-                                    exitEmergency();
+                                    printf("\r\n**********JIGA ISCA LORA DONE**********\r\n");
                                 }
 
                             }

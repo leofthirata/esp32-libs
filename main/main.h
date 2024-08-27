@@ -202,6 +202,12 @@ typedef struct
 
 typedef struct
 {
+	bool canSendP2P;
+    uint8_t targetLoraId[3];
+} IscaJiga_t;
+
+typedef struct
+{
 	//status
     IscaStatus_t status;
     
@@ -213,6 +219,8 @@ typedef struct
     
     //TIMERS
 	IscaTimers_t timers;
+
+    IscaJiga_t jiga;
 } Isca_t;
 
 #pragma pack()

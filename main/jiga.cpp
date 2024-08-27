@@ -1404,11 +1404,11 @@ void setup()
     m_config.config.p2p.sf = P2P_SPREADING_FACTOR;
     m_config.config.p2p.bw = P2P_BANDWIDTH;
     m_config.config.p2p.cr = 1;
-    m_config.config.p2p.txFreq = P2P_POS_FREQ;
+    m_config.config.p2p.txFreq = 905E6;
     m_config.config.p2p.txPower = P2P_TX_POWER;
-    m_config.config.p2p.rxFreq = P2P_CMD_FREQ;
+    m_config.config.p2p.rxFreq = 905E6;
     m_config.config.p2p.rxDelay = 0;
-    m_config.config.p2p.rxTimeout = 1000;//10000;//P2P_RX_TIMEOUT;
+    m_config.config.p2p.rxTimeout = 3000;//10000;//P2P_RX_TIMEOUT;
     m_config.config.p2p.txTimeout = P2P_TX_TIMEOUT;
 
     m_config.config.lrw.confirmed = false;
