@@ -48,7 +48,7 @@
 #define CONFIG_SCL_GPIO GPIO_NUM_26
 #define CONFIG_WP_GPIO GPIO_NUM_12
 
-typedef struct 
+typedef struct
 {
     uint8_t memVer;
     uint8_t hwVer;
@@ -63,7 +63,7 @@ typedef struct
     uint8_t imei[7];
 } OTPMemory_t;
 
-typedef union 
+typedef union
 {
     OTPMemory_t asParam;
     uint8_t asArray[sizeof(OTPMemory_t)];
@@ -71,7 +71,7 @@ typedef union
 
 static OTPMemory_t readMemory;
 
-typedef enum: uint8_t
+typedef enum : uint8_t
 {
     BAT_ABSENT = 0,
     BAT_DISCHARGING,
@@ -116,8 +116,6 @@ uint32_t ngrok_port = 0;
 
 static void gsm_send_position();
 static void lrw_send_status();
-static void lora_p2p_tx();
-static void lora_p2p_rx(LoRaP2PRx_t *_rx);
 
 uint8_t dallas_crc8(const uint8_t *pdata, const uint32_t size)
 {
@@ -369,200 +367,199 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
 {
     switch (event)
     {
-        case ESP_GATTS_REG_EVT:
-        {
-            ESP_LOGI(GATTS_TAG, "REGISTER_APP_EVT, status %d, app_id %d\n", param->reg.status, param->reg.app_id);
-            gl_profile_tab[PROFILE_A_APP_ID].service_id.is_primary = true;
-            gl_profile_tab[PROFILE_A_APP_ID].service_id.id.inst_id = 0x00;
-            gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.len = ESP_UUID_LEN_16;
-            gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID_TEST_A;
+    case ESP_GATTS_REG_EVT:
+    {
+        ESP_LOGI(GATTS_TAG, "REGISTER_APP_EVT, status %d, app_id %d\n", param->reg.status, param->reg.app_id);
+        gl_profile_tab[PROFILE_A_APP_ID].service_id.is_primary = true;
+        gl_profile_tab[PROFILE_A_APP_ID].service_id.id.inst_id = 0x00;
+        gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.len = ESP_UUID_LEN_16;
+        gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID_TEST_A;
 
-            esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(TEST_DEVICE_NAME);
-            if (set_dev_name_ret)
-            {
-                ESP_LOGE(GATTS_TAG, "set device name failed, error code = %x", set_dev_name_ret);
-            }
+        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(TEST_DEVICE_NAME);
+        if (set_dev_name_ret)
+        {
+            ESP_LOGE(GATTS_TAG, "set device name failed, error code = %x", set_dev_name_ret);
+        }
 #ifdef CONFIG_SET_RAW_ADV_DATA
-            esp_err_t raw_adv_ret = esp_ble_gap_config_adv_data_raw(raw_adv_data, sizeof(raw_adv_data));
-            if (raw_adv_ret)
-            {
-                ESP_LOGE(GATTS_TAG, "config raw adv data failed, error code = %x ", raw_adv_ret);
-            }
-            adv_config_done |= adv_config_flag;
-            esp_err_t raw_scan_ret = esp_ble_gap_config_scan_rsp_data_raw(raw_scan_rsp_data, sizeof(raw_scan_rsp_data));
-            if (raw_scan_ret)
-            {
-                ESP_LOGE(GATTS_TAG, "config raw scan rsp data failed, error code = %x", raw_scan_ret);
-            }
-            adv_config_done |= scan_rsp_config_flag;
+        esp_err_t raw_adv_ret = esp_ble_gap_config_adv_data_raw(raw_adv_data, sizeof(raw_adv_data));
+        if (raw_adv_ret)
+        {
+            ESP_LOGE(GATTS_TAG, "config raw adv data failed, error code = %x ", raw_adv_ret);
+        }
+        adv_config_done |= adv_config_flag;
+        esp_err_t raw_scan_ret = esp_ble_gap_config_scan_rsp_data_raw(raw_scan_rsp_data, sizeof(raw_scan_rsp_data));
+        if (raw_scan_ret)
+        {
+            ESP_LOGE(GATTS_TAG, "config raw scan rsp data failed, error code = %x", raw_scan_ret);
+        }
+        adv_config_done |= scan_rsp_config_flag;
 #else
-            // config adv data
-            esp_err_t ret = esp_ble_gap_config_adv_data(&adv_data);
-            if (ret)
-            {
-                ESP_LOGE(GATTS_TAG, "config adv data failed, error code = %x", ret);
-            }
-            adv_config_done |= adv_config_flag;
-            // config scan response data
-            ret = esp_ble_gap_config_adv_data(&scan_rsp_data);
-            if (ret)
-            {
-                ESP_LOGE(GATTS_TAG, "config scan response data failed, error code = %x", ret);
-            }
-            adv_config_done |= scan_rsp_config_flag;
+        // config adv data
+        esp_err_t ret = esp_ble_gap_config_adv_data(&adv_data);
+        if (ret)
+        {
+            ESP_LOGE(GATTS_TAG, "config adv data failed, error code = %x", ret);
+        }
+        adv_config_done |= adv_config_flag;
+        // config scan response data
+        ret = esp_ble_gap_config_adv_data(&scan_rsp_data);
+        if (ret)
+        {
+            ESP_LOGE(GATTS_TAG, "config scan response data failed, error code = %x", ret);
+        }
+        adv_config_done |= scan_rsp_config_flag;
 
 #endif
-            esp_ble_gatts_create_service(gatts_if, &gl_profile_tab[PROFILE_A_APP_ID].service_id, GATTS_NUM_HANDLE_TEST_A);
-            break;
-        }
-        case ESP_GATTS_READ_EVT:
-        {
-            ESP_LOGI(GATTS_TAG, "GATT_READ_EVT, conn_id %d, trans_id %" PRIu32 ", handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
-            esp_gatt_rsp_t rsp;
-            memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
-            rsp.attr_value.handle = param->read.handle;
-            rsp.attr_value.len = 6;
-            rsp.attr_value.value[0] = 0xA0;
-            rsp.attr_value.value[1] = 0xaf;
-            rsp.attr_value.value[2] = 0x03;
-            rsp.attr_value.value[3] = 0x01;
-            rsp.attr_value.value[4] = 0xf0;
-            rsp.attr_value.value[5] = 0xff;
-            esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
-                                        ESP_GATT_OK, &rsp);
-            
-
-            if (!is_otp_ok)
-                gsm_send_position();
-            else
-                xTaskNotify(m_sm_task, 0x04, eSetBits);
-            // esp_event_post(APP_EVENT, APP_EVENT_SEND_POS, NULL, NULL, 0);
-            break;
-        }
-        case ESP_GATTS_MTU_EVT:
-        {
-            ESP_LOGI(GATTS_TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
-            break;
-        }
-        case ESP_GATTS_UNREG_EVT:
-        {
-            break;
-        }
-        case ESP_GATTS_CREATE_EVT:
-        {
-            ESP_LOGI(GATTS_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d\n", param->create.status, param->create.service_handle);
-            gl_profile_tab[PROFILE_A_APP_ID].service_handle = param->create.service_handle;
-            gl_profile_tab[PROFILE_A_APP_ID].char_uuid.len = ESP_UUID_LEN_16;
-            gl_profile_tab[PROFILE_A_APP_ID].char_uuid.uuid.uuid16 = GATTS_CHAR_UUID_TEST_A;
-
-            esp_ble_gatts_start_service(gl_profile_tab[PROFILE_A_APP_ID].service_handle);
-            a_property = ESP_GATT_CHAR_PROP_BIT_READ;
-            esp_err_t add_char_ret = esp_ble_gatts_add_char(gl_profile_tab[PROFILE_A_APP_ID].service_handle, &gl_profile_tab[PROFILE_A_APP_ID].char_uuid,
-                                                            ESP_GATT_PERM_READ,
-                                                            a_property,
-                                                            &gatts_demo_char1_val, NULL);
-            if (add_char_ret)
-            {
-                ESP_LOGE(GATTS_TAG, "add char failed, error code =%x", add_char_ret);
-            }
-            break;
-        }
-        case ESP_GATTS_ADD_INCL_SRVC_EVT:
-        {
-            break;
-        }
-        case ESP_GATTS_ADD_CHAR_EVT:
-        {
-            uint16_t length = 0;
-            const uint8_t *prf_char;
-
-            ESP_LOGI(GATTS_TAG, "ADD_CHAR_EVT, status %d,  attr_handle %d, service_handle %d\n",
-                    param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
-            gl_profile_tab[PROFILE_A_APP_ID].char_handle = param->add_char.attr_handle;
-            gl_profile_tab[PROFILE_A_APP_ID].descr_uuid.len = ESP_UUID_LEN_16;
-            gl_profile_tab[PROFILE_A_APP_ID].descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
-            esp_err_t get_attr_ret = esp_ble_gatts_get_attr_value(param->add_char.attr_handle, &length, &prf_char);
-            if (get_attr_ret == ESP_FAIL)
-            {
-                ESP_LOGE(GATTS_TAG, "ILLEGAL HANDLE");
-            }
-
-            ESP_LOGI(GATTS_TAG, "the gatts demo char length = %x\n", length);
-            for (int i = 0; i < length; i++)
-            {
-                ESP_LOGI(GATTS_TAG, "prf_char[%x] =%x\n", i, prf_char[i]);
-            }
-            esp_err_t add_descr_ret = esp_ble_gatts_add_char_descr(gl_profile_tab[PROFILE_A_APP_ID].service_handle, &gl_profile_tab[PROFILE_A_APP_ID].descr_uuid,
-                                                                ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, NULL, NULL);
-            if (add_descr_ret)
-            {
-                ESP_LOGE(GATTS_TAG, "add char descr failed, error code =%x", add_descr_ret);
-            }
-            break;
-        }
-        case ESP_GATTS_ADD_CHAR_DESCR_EVT:
-        {
-            gl_profile_tab[PROFILE_A_APP_ID].descr_handle = param->add_char_descr.attr_handle;
-            ESP_LOGI(GATTS_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d\n",
-                    param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
-            break;
-        }
-        case ESP_GATTS_DELETE_EVT:
-        {
-            break;
-        }
-        case ESP_GATTS_START_EVT:
-        {
-            ESP_LOGI(GATTS_TAG, "SERVICE_START_EVT, status %d, service_handle %d\n",
-                    param->start.status, param->start.service_handle);
-            break;
-        }
-        case ESP_GATTS_STOP_EVT:
-        {
-            break;
-        }
-        case ESP_GATTS_CONNECT_EVT:
-        {
-            esp_ble_conn_update_params_t conn_params = {0};
-            memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
-            /* For the IOS system, please reference the apple official documents about the ble connection parameters restrictions. */
-            conn_params.latency = 0;
-            conn_params.max_int = 0x20; // max_int = 0x20*1.25ms = 40ms
-            conn_params.min_int = 0x10; // min_int = 0x10*1.25ms = 20ms
-            conn_params.timeout = 400;  // timeout = 400*10ms = 4000ms
-            ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:",
-                    param->connect.conn_id,
-                    param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
-                    param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
-            gl_profile_tab[PROFILE_A_APP_ID].conn_id = param->connect.conn_id;
-            // start sent the update connection parameters to the peer device.
-            esp_ble_gap_update_conn_params(&conn_params);
-            break;
-        }
-        case ESP_GATTS_DISCONNECT_EVT:
-        {
-            ESP_LOGI(GATTS_TAG, "ESP_GATTS_DISCONNECT_EVT, disconnect reason 0x%x", param->disconnect.reason);
-            esp_ble_gap_start_advertising(&adv_params);
-            break;
-        }
-        case ESP_GATTS_CONF_EVT:
-        {
-            ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONF_EVT, status %d attr_handle %d", param->conf.status, param->conf.handle);
-            if (param->conf.status != ESP_GATT_OK)
-            {
-                esp_log_buffer_hex(GATTS_TAG, param->conf.value, param->conf.len);
-            }
-            break;
-        }
-        case ESP_GATTS_OPEN_EVT:
-        case ESP_GATTS_CANCEL_OPEN_EVT:
-        case ESP_GATTS_CLOSE_EVT:
-        case ESP_GATTS_LISTEN_EVT:
-        case ESP_GATTS_CONGEST_EVT:
-        default:
-            break;
-        }
+        esp_ble_gatts_create_service(gatts_if, &gl_profile_tab[PROFILE_A_APP_ID].service_id, GATTS_NUM_HANDLE_TEST_A);
+        break;
     }
+    case ESP_GATTS_READ_EVT:
+    {
+        ESP_LOGI(GATTS_TAG, "GATT_READ_EVT, conn_id %d, trans_id %" PRIu32 ", handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
+        esp_gatt_rsp_t rsp;
+        memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+        rsp.attr_value.handle = param->read.handle;
+        rsp.attr_value.len = 6;
+        rsp.attr_value.value[0] = 0xA0;
+        rsp.attr_value.value[1] = 0xaf;
+        rsp.attr_value.value[2] = 0x03;
+        rsp.attr_value.value[3] = 0x01;
+        rsp.attr_value.value[4] = 0xf0;
+        rsp.attr_value.value[5] = 0xff;
+        esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
+                                    ESP_GATT_OK, &rsp);
+
+        if (!is_otp_ok)
+            gsm_send_position();
+        else
+            xTaskNotify(m_sm_task, 0x04, eSetBits);
+        // esp_event_post(APP_EVENT, APP_EVENT_SEND_POS, NULL, NULL, 0);
+        break;
+    }
+    case ESP_GATTS_MTU_EVT:
+    {
+        ESP_LOGI(GATTS_TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
+        break;
+    }
+    case ESP_GATTS_UNREG_EVT:
+    {
+        break;
+    }
+    case ESP_GATTS_CREATE_EVT:
+    {
+        ESP_LOGI(GATTS_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d\n", param->create.status, param->create.service_handle);
+        gl_profile_tab[PROFILE_A_APP_ID].service_handle = param->create.service_handle;
+        gl_profile_tab[PROFILE_A_APP_ID].char_uuid.len = ESP_UUID_LEN_16;
+        gl_profile_tab[PROFILE_A_APP_ID].char_uuid.uuid.uuid16 = GATTS_CHAR_UUID_TEST_A;
+
+        esp_ble_gatts_start_service(gl_profile_tab[PROFILE_A_APP_ID].service_handle);
+        a_property = ESP_GATT_CHAR_PROP_BIT_READ;
+        esp_err_t add_char_ret = esp_ble_gatts_add_char(gl_profile_tab[PROFILE_A_APP_ID].service_handle, &gl_profile_tab[PROFILE_A_APP_ID].char_uuid,
+                                                        ESP_GATT_PERM_READ,
+                                                        a_property,
+                                                        &gatts_demo_char1_val, NULL);
+        if (add_char_ret)
+        {
+            ESP_LOGE(GATTS_TAG, "add char failed, error code =%x", add_char_ret);
+        }
+        break;
+    }
+    case ESP_GATTS_ADD_INCL_SRVC_EVT:
+    {
+        break;
+    }
+    case ESP_GATTS_ADD_CHAR_EVT:
+    {
+        uint16_t length = 0;
+        const uint8_t *prf_char;
+
+        ESP_LOGI(GATTS_TAG, "ADD_CHAR_EVT, status %d,  attr_handle %d, service_handle %d\n",
+                 param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
+        gl_profile_tab[PROFILE_A_APP_ID].char_handle = param->add_char.attr_handle;
+        gl_profile_tab[PROFILE_A_APP_ID].descr_uuid.len = ESP_UUID_LEN_16;
+        gl_profile_tab[PROFILE_A_APP_ID].descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
+        esp_err_t get_attr_ret = esp_ble_gatts_get_attr_value(param->add_char.attr_handle, &length, &prf_char);
+        if (get_attr_ret == ESP_FAIL)
+        {
+            ESP_LOGE(GATTS_TAG, "ILLEGAL HANDLE");
+        }
+
+        ESP_LOGI(GATTS_TAG, "the gatts demo char length = %x\n", length);
+        for (int i = 0; i < length; i++)
+        {
+            ESP_LOGI(GATTS_TAG, "prf_char[%x] =%x\n", i, prf_char[i]);
+        }
+        esp_err_t add_descr_ret = esp_ble_gatts_add_char_descr(gl_profile_tab[PROFILE_A_APP_ID].service_handle, &gl_profile_tab[PROFILE_A_APP_ID].descr_uuid,
+                                                               ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, NULL, NULL);
+        if (add_descr_ret)
+        {
+            ESP_LOGE(GATTS_TAG, "add char descr failed, error code =%x", add_descr_ret);
+        }
+        break;
+    }
+    case ESP_GATTS_ADD_CHAR_DESCR_EVT:
+    {
+        gl_profile_tab[PROFILE_A_APP_ID].descr_handle = param->add_char_descr.attr_handle;
+        ESP_LOGI(GATTS_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d\n",
+                 param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
+        break;
+    }
+    case ESP_GATTS_DELETE_EVT:
+    {
+        break;
+    }
+    case ESP_GATTS_START_EVT:
+    {
+        ESP_LOGI(GATTS_TAG, "SERVICE_START_EVT, status %d, service_handle %d\n",
+                 param->start.status, param->start.service_handle);
+        break;
+    }
+    case ESP_GATTS_STOP_EVT:
+    {
+        break;
+    }
+    case ESP_GATTS_CONNECT_EVT:
+    {
+        esp_ble_conn_update_params_t conn_params = {0};
+        memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
+        /* For the IOS system, please reference the apple official documents about the ble connection parameters restrictions. */
+        conn_params.latency = 0;
+        conn_params.max_int = 0x20; // max_int = 0x20*1.25ms = 40ms
+        conn_params.min_int = 0x10; // min_int = 0x10*1.25ms = 20ms
+        conn_params.timeout = 400;  // timeout = 400*10ms = 4000ms
+        ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:",
+                 param->connect.conn_id,
+                 param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
+                 param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
+        gl_profile_tab[PROFILE_A_APP_ID].conn_id = param->connect.conn_id;
+        // start sent the update connection parameters to the peer device.
+        esp_ble_gap_update_conn_params(&conn_params);
+        break;
+    }
+    case ESP_GATTS_DISCONNECT_EVT:
+    {
+        ESP_LOGI(GATTS_TAG, "ESP_GATTS_DISCONNECT_EVT, disconnect reason 0x%x", param->disconnect.reason);
+        esp_ble_gap_start_advertising(&adv_params);
+        break;
+    }
+    case ESP_GATTS_CONF_EVT:
+    {
+        ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONF_EVT, status %d attr_handle %d", param->conf.status, param->conf.handle);
+        if (param->conf.status != ESP_GATT_OK)
+        {
+            esp_log_buffer_hex(GATTS_TAG, param->conf.value, param->conf.len);
+        }
+        break;
+    }
+    case ESP_GATTS_OPEN_EVT:
+    case ESP_GATTS_CANCEL_OPEN_EVT:
+    case ESP_GATTS_CLOSE_EVT:
+    case ESP_GATTS_LISTEN_EVT:
+    case ESP_GATTS_CONGEST_EVT:
+    default:
+        break;
+    }
+}
 
 static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
 {
@@ -608,7 +605,7 @@ static void gsm_send_position()
 
     gsmTx.payload.header = 0xD7;
     uint64_t serial = 0;
-    serial = (uint64_t) 109*100000000 + m_config.rom.loraId;
+    serial = (uint64_t)109 * 100000000 + m_config.rom.loraId;
     gsmTx.payload.serialNumber[0] = (serial >> 32) & 0xFF;
     gsmTx.payload.serialNumber[1] = (serial >> 24) & 0xFF;
     gsmTx.payload.serialNumber[2] = (serial >> 16) & 0xFF;
@@ -621,7 +618,7 @@ static void gsm_send_position()
     gsmTx.payload.counter[0] = (counter >> 8) & 0xFF;
     gsmTx.payload.counter[1] = counter & 0xFF;
     m_config.status.GSMCount = counter;
-    if(counter == 0xFFFF)
+    if (counter == 0xFFFF)
         counter = 0;
     else
         counter++;
@@ -631,8 +628,7 @@ static void gsm_send_position()
     gsmTx.payload.timestamp[1] = (current.tv_sec >> 16) & 0xFF;
     gsmTx.payload.timestamp[2] = (current.tv_sec >> 8) & 0xFF;
     gsmTx.payload.timestamp[3] = (current.tv_sec) & 0xFF;
-    
-    
+
     gsmTx.payload.type = 0x00;
     gsmTx.payload.loraID[0] = (m_config.rom.loraId >> 16) & 0xff;
     gsmTx.payload.loraID[1] = (m_config.rom.loraId >> 8) & 0xff;
@@ -659,27 +655,54 @@ static void gsm_send_position()
 }
 
 static void app_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data)
+                              int32_t event_id, void *event_data)
 {
-    if(event_base == APP_EVENT && event_id == APP_EVENT_GSM_TX_RES)
+    if (event_base == APP_EVENT && event_id == APP_EVENT_GSM_TX_RES)
     {
-        GSMTxRes_t *gsmTxRes_p = (GSMTxRes_t*) event_data;
+        GSMTxRes_t *gsmTxRes_p = (GSMTxRes_t *)event_data;
         memcpy(&gsmTxRes, gsmTxRes_p, sizeof(GSMTxRes_t));
         xTaskNotify(xTaskToNotify, 0x200, eSetBits);
     }
-    if(event_base == APP_EVENT && event_id == APP_EVENT_JIGA)
+    if (event_base == APP_EVENT && event_id == APP_EVENT_JIGA)
     {
         xTaskNotify(m_otp_task, 0, eSetValueWithOverwrite);
     }
-    if (event_base == APP_EVENT && event_id == APP_EVENT_P2P_RX)
+}
+
+void ble_deinit()
+{
+    esp_err_t ret = 0;
+    esp_ble_gap_stop_advertising();
+
+    ret = esp_bluedroid_disable();
+    if (ret != ESP_OK)
     {
-        Serial.printf("************APP_EVENT_P2P_RX************");
-        LoRaP2PRx_t *p2pRx_p = (LoRaP2PRx_t*) event_data;
-        // memcpy(&p2pRx, p2pRx_p, sizeof(LoRaP2PRx_t));
-        // xQueueSend(xQueueP2PRx, &p2pRx, 0);
-        lora_p2p_rx(&p2pRx);
+        printf("esp_bt_controller_disable FAILEd =%d\n", ret);
     }
 
+    ret = esp_bluedroid_deinit();
+    if (ret != ESP_OK)
+    {
+        printf("esp_bluedroid_deinit FAILEd =%d\n", ret);
+    }
+
+    ret = esp_bt_controller_disable();
+    if (ret != ESP_OK)
+    {
+        printf("esp_bt_controller_disable FAILEd =%d\n", ret);
+    }
+
+    ret = esp_bt_controller_deinit();
+    if (ret != ESP_OK)
+    {
+        printf("ble deiniet FAILEd =%d\n", ret);
+    }
+
+    ret = esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
+    if (ret != ESP_OK)
+    {
+        printf("ble mem_release FAILEd =%d\n", ret);
+    }
 }
 
 void otp_task(void *parameter)
@@ -689,6 +712,7 @@ void otp_task(void *parameter)
     printf("\r\n**********JIGA ISCA OTP BEGIN**********\r\n");
 
     vTaskDelete(m_gsm_task);
+    ble_deinit();
 
     uint32_t idx = 0;
 
@@ -758,6 +782,14 @@ void otp_task(void *parameter)
     memcpy(otp.asParam.appSKey, &rcv[44], 16);
     memcpy(otp.asParam.imei, m_config.rom.imei, 7);
 
+    m_config.rom.loraId = (otp.asParam.loraID[0] << 16) + (otp.asParam.loraID[1] << 8) + (otp.asParam.loraID[2]);
+    memcpy(m_config.rom.deviceEUI, otp.asParam.devEUI, 8);
+    memcpy(m_config.rom.appEUI, otp.asParam.appEUI, 8);
+    m_config.rom.devAddr = (otp.asParam.devAddr[0] << 24) + (otp.asParam.devAddr[1] << 16) +
+                           (otp.asParam.devAddr[2] << 8) + otp.asParam.devAddr[3];
+    memcpy(m_config.rom.nwkSKey, otp.asParam.nwSKey, 16);
+    memcpy(m_config.rom.appSKey, otp.asParam.appSKey, 16);
+
     ESP_LOG_BUFFER_HEX("otp", otp.asArray, sizeof(OTPMemory_t)); // size 71
 
     uint8_t otpCrc[82];
@@ -808,7 +840,7 @@ void otp_task(void *parameter)
             if (crc_cal != (readFromMemory[k * 8 + 1]))
             {
                 printf("corrupted data %d crc_calc:%02X crc_mem: %02X, trying again\r\n", k,
-                    crc_cal, readFromMemory[k * 8 + 1]);
+                       crc_cal, readFromMemory[k * 8 + 1]);
             }
         }
         else
@@ -817,17 +849,23 @@ void otp_task(void *parameter)
             if (crc_cal != (readFromMemory[k * 8 + 7]))
             {
                 printf("corrupted data %d crc_calc:%02X crc_mem: %02X, trying again\r\n", k,
-                    crc_cal, readFromMemory[k * 8 + 7]);
+                       crc_cal, readFromMemory[k * 8 + 7]);
                 k--;
                 count++;
                 vTaskDelay(pdMS_TO_TICKS(3000));
             }
             if (count >= 5)
             {
-                printf("\r\n**********JIGA ISCA OTP FAILED TO READ**********\r\n");
+                printf("\r\n**********JIGA ISCA OTP FAIL CRC**********\r\n");
                 break;
             }
         }
+    }
+
+    for (int i = 0; i < 82; i++)
+    {
+        if (otpCrc[i] != readFromMemory[i])
+            printf("\r\n**********JIGA ISCA OTP FAILED TO READ 0x%02X != 0x%02X**********\r\n", otpCrc[i], readFromMemory[i]);
     }
 
     for (int i = 0; i < 10; i++)
@@ -865,19 +903,19 @@ void otp_task(void *parameter)
            parseData.appSKey[9], parseData.appSKey[10], parseData.appSKey[11], parseData.appSKey[12],
            parseData.appSKey[13], parseData.appSKey[14], parseData.appSKey[15]);
     printf("        mac: %02X:%02X:%02X:%02X:%02X:%02X\r\n", parseData.bleMac[0], parseData.bleMac[1],
-            parseData.bleMac[2],parseData.bleMac[3], parseData.bleMac[4], parseData.bleMac[5]);
-    
+           parseData.bleMac[2], parseData.bleMac[3], parseData.bleMac[4], parseData.bleMac[5]);
+
     uint64_t _imei = 0L;
-        _imei += (((uint64_t) parseData.imei[0])<<48);
-        _imei += (((uint64_t) parseData.imei[1])<<40);
-        _imei += (((uint64_t) parseData.imei[2])<<32);
-        _imei += (((uint64_t) parseData.imei[3])<<24);
-        _imei += (((uint64_t) parseData.imei[4])<<16);
-        _imei += (((uint64_t) parseData.imei[5])<<8);
-        _imei += (((uint64_t) parseData.imei[6]));
+    _imei += (((uint64_t)parseData.imei[0]) << 48);
+    _imei += (((uint64_t)parseData.imei[1]) << 40);
+    _imei += (((uint64_t)parseData.imei[2]) << 32);
+    _imei += (((uint64_t)parseData.imei[3]) << 24);
+    _imei += (((uint64_t)parseData.imei[4]) << 16);
+    _imei += (((uint64_t)parseData.imei[5]) << 8);
+    _imei += (((uint64_t)parseData.imei[6]));
 
     printf("        imei: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X = %lld\r\n", parseData.imei[0], parseData.imei[1],
-            parseData.imei[2], parseData.imei[3], parseData.imei[4], parseData.imei[5], parseData.imei[6], _imei);
+           parseData.imei[2], parseData.imei[3], parseData.imei[4], parseData.imei[5], parseData.imei[6], _imei);
 
     dev->deinit();
 
@@ -1022,15 +1060,15 @@ void ble_init()
 
     uint8_t mac[6];
     ret = esp_efuse_mac_get_default(mac);
-    if (ret == ESP_OK) 
+    if (ret == ESP_OK)
     {
         Serial.printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
-                    mac[0], mac[1], mac[2],
-                    mac[3], mac[4], mac[5] + 2);
+                      mac[0], mac[1], mac[2],
+                      mac[3], mac[4], mac[5] + 2);
         mac[5] = mac[5] + 2;
         memcpy(otp.asParam.bleMac, mac, 6);
-    } 
-    else     
+    }
+    else
     {
         Serial.println("Failed to read MAC address");
     }
@@ -1084,20 +1122,20 @@ void serial_receive_gsm_port()
     printf("\r\n**********JIGA ISCA R800C GSM PORT RECEIVED**********\r\n");
 }
 
-const char* printBatStatus(SensorsBatStatus_t type)
+const char *printBatStatus(SensorsBatStatus_t type)
 {
-    switch(type)
+    switch (type)
     {
-        case BAT_ABSENT:
-            return "BAT_ABSENT";
-        case BAT_DISCHARGING:
-            return "BAT_DISCHARGING";
-        case BAT_CHARGING:
-            return "BAT_CHARGING";
-        case BAT_CHARGED:
-            return "BAT_CHARGED";
-        default:
-            break;
+    case BAT_ABSENT:
+        return "BAT_ABSENT";
+    case BAT_DISCHARGING:
+        return "BAT_DISCHARGING";
+    case BAT_CHARGING:
+        return "BAT_CHARGING";
+    case BAT_CHARGED:
+        return "BAT_CHARGED";
+    default:
+        break;
     }
     return "BAT_ERROR";
 }
@@ -1108,7 +1146,8 @@ static bool adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_att
     esp_err_t ret = ESP_FAIL;
     bool calibrated = false;
 
-    if (!calibrated) {
+    if (!calibrated)
+    {
         ESP_LOGI(TAG, "calibration scheme version is %s", "Line Fitting");
         adc_cali_line_fitting_config_t cali_config = {
             .unit_id = unit,
@@ -1116,17 +1155,23 @@ static bool adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_att
             .bitwidth = ADC_BITWIDTH_DEFAULT,
         };
         ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
-        if (ret == ESP_OK) {
+        if (ret == ESP_OK)
+        {
             calibrated = true;
         }
     }
 
     *out_handle = handle;
-    if (ret == ESP_OK) {
+    if (ret == ESP_OK)
+    {
         ESP_LOGI(TAG, "Calibration Success");
-    } else if (ret == ESP_ERR_NOT_SUPPORTED || !calibrated) {
+    }
+    else if (ret == ESP_ERR_NOT_SUPPORTED || !calibrated)
+    {
         ESP_LOGW(TAG, "eFuse not burnt, skip software calibration");
-    } else {
+    }
+    else
+    {
         ESP_LOGE(TAG, "Invalid arg or no memory");
     }
 
@@ -1166,7 +1211,7 @@ void adc_read(int voltage[3])
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_4, &config));
 
     //-------------ADC1 Calibration Init---------------//
-   
+
     adc_cali_handle_t adc1_cali_chan0_handle = NULL;
     adc_cali_handle_t adc1_cali_chan2_handle = NULL;
     adc_cali_handle_t adc1_cali_chan4_handle = NULL;
@@ -1186,21 +1231,20 @@ void adc_read(int voltage[3])
     ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_0, &adc_raw[0]));
     ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_2, &adc_raw[1]));
     ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_4, &adc_raw[2]));
-    
+
     gpio_set_direction(PIN_BAT_ADC_CTRL, GPIO_MODE_INPUT);
 
-    if (do_calibration1_chan0) 
+    if (do_calibration1_chan0)
     {
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw[0], &voltage[0]));
-        sprintf(&printLog[0][0], "[BAT_ADC]: %d mV", 2*voltage[0]);
+        sprintf(&printLog[0][0], "[BAT_ADC]: %d mV", 2 * voltage[0]);
     }
     else
     {
         sprintf(&printLog[0][0], "BAT_ADC: 0x%03X", adc_raw[0]);
     }
 
-
-    if (do_calibration1_chan2) 
+    if (do_calibration1_chan2)
     {
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan2_handle, adc_raw[1], &voltage[1]));
         sprintf(&printLog[1][0], "[BMS_CHR]: %d mV", voltage[1]);
@@ -1210,7 +1254,7 @@ void adc_read(int voltage[3])
         sprintf(&printLog[1][0], "[BMS_CHR]: 0x%03X", adc_raw[1]);
     }
 
-    if (do_calibration1_chan4) 
+    if (do_calibration1_chan4)
     {
         ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_chan4_handle, adc_raw[2], &voltage[2]));
         sprintf(&printLog[2][0], "[BMS_DON]: %d mV", voltage[2]);
@@ -1219,148 +1263,44 @@ void adc_read(int voltage[3])
     {
         sprintf(&printLog[2][0], "[BMS_DON]: 0x%03X", adc_raw[2]);
     }
-    
-    if(2*voltage[0] < 1000)
+
+    if (2 * voltage[0] < 1000)
     {
         _sensorStatus.batStatus = BAT_ABSENT;
     }
-    else if(voltage[1] > 1800 && voltage[2] > 1800)
+    else if (voltage[1] > 1800 && voltage[2] > 1800)
     {
         _sensorStatus.batStatus = BAT_DISCHARGING;
     }
-    else if(voltage[1] < 1800 && voltage[2] > 1800)
+    else if (voltage[1] < 1800 && voltage[2] > 1800)
     {
         _sensorStatus.batStatus = BAT_CHARGING;
     }
-    else if(voltage[1] > 1800 && voltage[2] < 1800)
+    else if (voltage[1] > 1800 && voltage[2] < 1800)
     {
         _sensorStatus.batStatus = BAT_CHARGED;
     }
-    else if(voltage[1] < 1800 && voltage[2] < 1800)
+    else if (voltage[1] < 1800 && voltage[2] < 1800)
     {
-    
     }
-    
-    _sensorStatus.batVoltage = 2*voltage[0];
+
+    _sensorStatus.batVoltage = 2 * voltage[0];
 
     ESP_LOGW(TAG, "%s %s %s | batStatus:%s",
-            printLog[0], printLog[1], printLog[2], printBatStatus((SensorsBatStatus_t)_sensorStatus.batStatus));
-    
+             printLog[0], printLog[1], printLog[2], printBatStatus((SensorsBatStatus_t)_sensorStatus.batStatus));
+
     ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
 
-    if (do_calibration1_chan0) 
+    if (do_calibration1_chan0)
         adc_calibration_deinit(adc1_cali_chan0_handle);
 
-    if (do_calibration1_chan2) 
+    if (do_calibration1_chan2)
         adc_calibration_deinit(adc1_cali_chan2_handle);
 
-    if (do_calibration1_chan4) 
+    if (do_calibration1_chan4)
         adc_calibration_deinit(adc1_cali_chan4_handle);
 }
 
-static void lora_p2p_rx(LoRaP2PRx_t *_rx)
-{
-    char payload[256];
-    for(int i = 0; i < _rx->payload.size; i++)
-    {
-        snprintf(&payload[i*3], 256, "%02X ", _rx->payload.buffer[i]);
-    }
-    payload[_rx->payload.size * 3] = 0x00;
-    printf("[LORA] P2P RCV: %s\r\n", payload);
-
-    if(_rx->payload.size == sizeof(CommandP2P_t))
-    {
-        CommandP2PUnion_t commandReceived;
-        memcpy(commandReceived.array, _rx->payload.buffer, _rx->payload.size);
-
-        uint8_t lCrc = commandReceived.param.crc8;
-        commandReceived.param.crc8 = 0;
-        uint8_t crcValidation = dallas_crc8(commandReceived.array, sizeof(CommandP2P_t));
-
-        if(crcValidation == lCrc)
-        {
-            uint32_t idLora = 0;
-            idLora += commandReceived.param.loraIdReceiveCommand[0];
-            idLora += (commandReceived.param.loraIdReceiveCommand[1] << 8);
-            idLora += (commandReceived.param.loraIdReceiveCommand[2] << 16);
-
-            if (idLora == m_config.rom.loraId)
-            {
-                printf("[LORA] Message for me from %02X%02X%02X | rssi: %d | srn: %d | ",
-                                            commandReceived.param.loraIdGw[2],
-                                            commandReceived.param.loraIdGw[1],
-                                            commandReceived.param.loraIdGw[0],
-                                            _rx->params.rssi, _rx->params.snr);
-
-                // if (commandReceived.param.loraEmergencyCommand)
-                // {
-                //     enterEmergency();
-                // }
-                // else
-                // {
-                //     exitEmergency();
-                // }
-            }
-            else
-            {
-                printf("[LORA] No P2P_RX for me =(\r\n");
-            }
-        }
-    }
-}
-
-static void lora_p2p_tx()
-{
-    LoRaP2PReq_t p2pTx;
-    static uint8_t counter = 0;
-    PositionP2PUnion_t pos;
-    memset(&pos, 0, sizeof(PositionP2PUnion_t));
-
-    float P2PBattery = (float)(m_config.status.batteryMiliVolts / 20.0);
-
-    pos.param.loraId[0] = (uint8_t) m_config.rom.loraId & 0xFFFFFF;
-    pos.param.loraId[1] = (uint8_t) (m_config.rom.loraId >> 8) & 0xFFFF;
-    pos.param.loraId[2] = (uint8_t) (m_config.rom.loraId >> 16) & 0xFF;
-    pos.param.packetType = 80;
-    pos.param.flags.headingGps = 511;
-    pos.param.flags.batteryVoltageInfos = 2;
-
-    pos.param.batteryVoltage = (uint8_t)(P2PBattery < 0 ? (P2PBattery - 0.5) : (P2PBattery + 0.5));;
-    pos.param.flags.accelerometerStatus = m_config.status.flags.asBit.movement;
-    pos.param.flags.criticalBatteryStatus = m_config.status.flags.asBit.lowBattery;
-    pos.param.flags.powerSupplyStatus = m_config.status.flags.asBit.powerSupply;
-    pos.param.flags.emergencyStatus = m_config.status.flags.asBit.emergency;
-    pos.param.header.sequenceNumber = counter;
-
-    m_config.status.P2PCount = counter;
-    if (counter++ > 63)
-        counter = 0;
-
-    pos.array[5] = dallas_crc8((const uint8_t*) (pos.array),
-    sizeof(PositionP2P_t));
-
-    memset(&p2pTx.payload.buffer, 0, sizeof(p2pTx.payload.buffer));
-    memcpy(&p2pTx.payload.buffer, pos.array, sizeof(PositionP2P_t));
-    p2pTx.payload.size = sizeof(PositionP2P_t);
-
-    p2pTx.params.txFreq = m_config.config.p2p.txFreq;
-    p2pTx.params.txPower = m_config.config.p2p.txPower;
-    p2pTx.params.BW = m_config.config.p2p.bw;
-    p2pTx.params.SF = m_config.config.p2p.sf;
-    p2pTx.params.CR = m_config.config.p2p.cr;
-    p2pTx.params.rxFreq = m_config.config.p2p.rxFreq;
-    p2pTx.params.rxDelay = m_config.config.p2p.rxDelay;
-    p2pTx.params.rxTimeout = m_config.config.p2p.rxTimeout;
-    p2pTx.params.txTimeout = m_config.config.p2p.txTimeout;
-    esp_event_post(APP_EVENT, APP_EVENT_P2P_TX_REQ, (void*)&p2pTx, sizeof(LoRaP2PReq_t), 0);
-}
-
-
-// serial waits for gsm port before starting everything
-// test acc
-// test gsm -> show results in ble read
-// write otp -> show results in ble read
-// stop test when read ble char test bit shows done
 void setup()
 {
     Serial.begin(115200);
@@ -1374,28 +1314,27 @@ void setup()
     BiColorStatus::turnOn();
 
     OTPMemory_t hardCodedROM = {
-                    .memVer = 0xDD,
-                    .hwVer = 0xAA,
-                    .prefixSN = 0x6D,
-                    .loraID = {0xbe, 0xbc, 0x25},
-                    .devAddr = {0x5d, 0x1f, 0x42, 0x61},
-                    .devEUI = {0x34, 0xe5, 0x51, 0xdf, 0x6d, 0xab, 0xc5, 0x6b},
-                    .appEUI = {0x2c, 0xa5, 0xae, 0x9d, 0xf4, 0xaf, 0x41, 0x4a},
-                    .nwSKey = {0x45, 0x5d, 0xd8, 0xb2, 0x11, 0x65, 0x3e, 0x5c, 0xbd, 0xbf, 0xb1, 0x29, 0xa3, 0x29, 0xb2, 0x99},
-                    .appSKey = {0x5e, 0xc0, 0x07, 0x25, 0x72, 0x47, 0xf1, 0xb0, 0x9a, 0xad, 0x8f, 0x61, 0xe8, 0xca, 0x4d, 0xd1}
-    };
+        .memVer = 0xDD,
+        .hwVer = 0xAA,
+        .prefixSN = 0x6D,
+        .loraID = {0xbe, 0xbc, 0x25},
+        .devAddr = {0x5d, 0x1f, 0x42, 0x61},
+        .devEUI = {0x34, 0xe5, 0x51, 0xdf, 0x6d, 0xab, 0xc5, 0x6b},
+        .appEUI = {0x2c, 0xa5, 0xae, 0x9d, 0xf4, 0xaf, 0x41, 0x4a},
+        .nwSKey = {0x45, 0x5d, 0xd8, 0xb2, 0x11, 0x65, 0x3e, 0x5c, 0xbd, 0xbf, 0xb1, 0x29, 0xa3, 0x29, 0xb2, 0x99},
+        .appSKey = {0x5e, 0xc0, 0x07, 0x25, 0x72, 0x47, 0xf1, 0xb0, 0x9a, 0xad, 0x8f, 0x61, 0xe8, 0xca, 0x4d, 0xd1}};
     memcpy(&readMemory, &hardCodedROM, sizeof(OTPMemory_t));
 
     memset(&m_config, 0, sizeof(m_config));
-    m_config.rom.loraId = (readMemory.loraID[0]<<16) + (readMemory.loraID[1]<<8) + (readMemory.loraID[2]);
+    m_config.rom.loraId = (readMemory.loraID[0] << 16) + (readMemory.loraID[1] << 8) + (readMemory.loraID[2]);
     memcpy(m_config.rom.deviceEUI, readMemory.devEUI, 8);
     memcpy(m_config.rom.appEUI, readMemory.appEUI, 8);
-    m_config.rom.devAddr = (readMemory.devAddr[0]<<24) + (readMemory.devAddr[1]<<16) +
-        (readMemory.devAddr[2]<<8) + readMemory.devAddr[3];
+    m_config.rom.devAddr = (readMemory.devAddr[0] << 24) + (readMemory.devAddr[1] << 16) +
+                           (readMemory.devAddr[2] << 8) + readMemory.devAddr[3];
     memcpy(m_config.rom.nwkSKey, readMemory.nwSKey, 16);
     memcpy(m_config.rom.appSKey, readMemory.appSKey, 16);
-    
-    printf("loraID: %ld | devAddress: %08lX\r\n", m_config.rom.loraId,m_config.rom.devAddr);
+
+    printf("loraID: %ld | devAddress: %08lX\r\n", m_config.rom.loraId, m_config.rom.devAddr);
     ESP_LOG_BUFFER_HEX("deviceEUI", m_config.rom.deviceEUI, sizeof(m_config.rom.deviceEUI));
     ESP_LOG_BUFFER_HEX("appEUI", m_config.rom.appEUI, sizeof(m_config.rom.appEUI));
     ESP_LOG_BUFFER_HEX("nwSKey", m_config.rom.nwkSKey, sizeof(m_config.rom.nwkSKey));
@@ -1408,7 +1347,7 @@ void setup()
     m_config.config.p2p.txPower = P2P_TX_POWER;
     m_config.config.p2p.rxFreq = 905E6;
     m_config.config.p2p.rxDelay = 0;
-    m_config.config.p2p.rxTimeout = 3000;//10000;//P2P_RX_TIMEOUT;
+    m_config.config.p2p.rxTimeout = 10000; // 10000;//P2P_RX_TIMEOUT;
     m_config.config.p2p.txTimeout = P2P_TX_TIMEOUT;
 
     m_config.config.lrw.confirmed = false;
@@ -1428,12 +1367,17 @@ void setup()
 
     // if bat voltage < 3 -> no batt found -> no gsm testing
 
+    m_config.jiga.canSendP2P = false;
+
     int bat_voltage[3];
     adc_read(bat_voltage);
-    if (bat_voltage[0]*2 > 3300)
+    if (bat_voltage[0] * 2 > 3300)
         printf("\r\n**********JIGA ISCA BATTERY FOUND**********\r\n");
     else
         printf("\r\n**********JIGA ISCA BATTERY NOT FOUND**********\r\n");
+
+    adc_read(bat_voltage);
+    adc_read(bat_voltage);
 
     test_acc();
     serial_receive_gsm_port();
@@ -1441,26 +1385,30 @@ void setup()
 
     xTaskToNotify = xTaskGetCurrentTaskHandle();
     esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
-    xTaskCreate(gsmTask, "gsm_task", 8192, (void*) &m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
+    xTaskCreate(gsmTask, "gsm_task", 8192, (void *)&m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
     xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 4, &m_otp_task);
-    xTaskCreate(loraTask, "lora_task", 4096, (void*) &m_config, 5, &m_lora_task);
-    xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void*) &m_config, 6, &m_sm_task, 0);
+    xTaskCreate(loraTask, "lora_task", 4096, (void *)&m_config, 5, &m_lora_task);
+    xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void *)&m_config, 6, &m_sm_task, 0);
 }
 
 void loop()
 {
-    vTaskDelay(100);
+    if (m_config.jiga.canSendP2P == true)
+    {
+        xTaskNotify(m_sm_task, 0x04, eSetBits);
+    }
+    vTaskDelay(5000);
 }
 
 // 0A AF 12 AB 0C C6 5D BB 80 4C 28 DE A1 4E 2A 60 84 4C 94 97 7D 60 EE AF C9 EE 72 BD 75 58 87 5D A2 C8 5C FB 41 14 F3 FA 2A A1 9D CD 15 64 D6 74 27 82 84 89 D8 B1 E7 7A 6B 59 00 53 F0 FF
-// 12 
-// AB 
-// 0C 
-// C6 5D BB 
-// 80 4C 28 DE 
-// A1 4E 2A 60 84 4C 94 97 
-// 7D 60 EE AF C9 EE 72 BD 
-// 75 58 87 5D A2 C8 5C FB 41 14 F3 FA 2A A1 9D CD 
+// 12
+// AB
+// 0C
+// C6 5D BB
+// 80 4C 28 DE
+// A1 4E 2A 60 84 4C 94 97
+// 7D 60 EE AF C9 EE 72 BD
+// 75 58 87 5D A2 C8 5C FB 41 14 F3 FA 2A A1 9D CD
 // 15 64 D6 74 27 82 84 89 D8 B1 E7 7A 6B 59 00 53
 
 // jiga isca ordem

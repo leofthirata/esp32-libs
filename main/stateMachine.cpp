@@ -724,7 +724,6 @@ void stateTask (void* pvParameters)
 
             case SM_P2P_RX:
             {
-                printf("***********SM_P2P_RX***********");
                 LoRaP2PRx_t _rx;
                 if(xQueueReceive(xQueueP2PRx, &_rx, 10) == pdPASS)
                 {
@@ -760,13 +759,13 @@ void stateTask (void* pvParameters)
                                                             commandReceived.param.loraIdGw[0],
                                                             _rx.params.rssi, _rx.params.snr);
 
-                                if (commandReceived.param.loraEmergencyCommand && 
-                                        commandReceived.param.packetType == 0xFF && 
+                                if (commandReceived.param.packetType == 0xFF && 
                                         commandReceived.param.loraIdGw[0] == 0xFF &&
                                         commandReceived.param.loraIdGw[1] == 0xFF &&
                                         commandReceived.param.loraIdGw[2] == 0xFF)
                                 {
                                     printf("\r\n**********JIGA ISCA LORA DONE**********\r\n");
+                                    m_isca->jiga.canSendP2P = false;
                                 }
 
                             }

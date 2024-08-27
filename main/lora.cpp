@@ -332,6 +332,8 @@ void loraTask(void* param)
 
     printf("\r\n**********JIGA ISCA LORA BEGIN**********\r\n");
 
+    config->jiga.canSendP2P = true;
+
 	while(1)
     {
         ESP_LOGI(TAG, "%s", printLoRaStateMachineState(state));
