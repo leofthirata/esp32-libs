@@ -753,7 +753,7 @@ void stateTask (void* pvParameters)
 
                             if (idLora == m_isca->rom.loraId)
                             {
-                                printf("[LORA] Message for me from %02X%02X%02X | rssi: %d | srn: %d | ",
+                                printf("[LORA] Message for me from %02X%02X%02X | rssi: %d | snr: %d | ",
                                                             commandReceived.param.loraIdGw[2],
                                                             commandReceived.param.loraIdGw[1],
                                                             commandReceived.param.loraIdGw[0],

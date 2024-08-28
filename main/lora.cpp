@@ -363,6 +363,13 @@ void loraTask(void* param)
 				{
 					xTaskNotifyWait( pdFALSE, pdFALSE, &ulNotifiedValue, xMaxBlockTime );
 				}
+
+                if (config->jiga.canSendP2P == false)
+                {
+                    xQueueReset(xQueueLoRa);
+                    vTaskDelete(NULL);
+                }
+
 				ESP_LOGI(TAG, "flags: %03lX | free xQueueTxLoRa = %d/%d", ulNotifiedValue, uxQueueSpacesAvailable(xQueueLoRa),LORA_TX_QUEUE_SIZE);
 
 				if( ( ulNotifiedValue & LORA_BIT_P2P_TX_DONE ) != 0 )
