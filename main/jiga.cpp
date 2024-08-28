@@ -792,16 +792,16 @@ void otp_task(void *parameter)
 
     ESP_LOG_BUFFER_HEX("otp", otp.asArray, sizeof(OTPMemory_t)); // size 71
 
-    uint8_t otpCrc[82];
-    memset(otpCrc, 0, 82);
+    uint8_t otpCrc[88];
+    memset(otpCrc, 0xFF, 88);
 
     for (int i = 0; i < 11; i++)
     {
         if (i == 10)
         {
             otpCrc[80] = otp.asArray[70];
-            otpCrc[81] = dallas_crc8(&otp.asArray[70], 1);
-            printf("otpCrc = %d", otpCrc[81]);
+            otpCrc[87] = dallas_crc8(&otpCrc[80], 7);
+            printf("otpCrc = %d", otpCrc[87]);
         }
         else
         {
