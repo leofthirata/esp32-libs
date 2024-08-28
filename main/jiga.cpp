@@ -811,10 +811,10 @@ void otp_task(void *parameter)
         }
         ESP_LOG_BUFFER_HEX("otp_left", &otp.asArray[i * 7], 7); // size 71
     }
-    ESP_LOG_BUFFER_HEX("otpCrc", otpCrc, 82);
+    ESP_LOG_BUFFER_HEX("otpCrc", otpCrc, 88);
 
     // write otp with crc every 7 bytes
-    err = dev->at24c02d_write_byte(0x00, otpCrc, 82);
+    err = dev->at24c02d_write_byte(0x00, otpCrc, 88);
 
     // uint8_t temp256[256];
     // err = dev->at24c02d_read_byte(0x00, temp256, 256);
@@ -833,36 +833,23 @@ void otp_task(void *parameter)
     for (int k = 0; k < 11; k++)
     {
         dev->at24c02d_read_byte(k * 8, (&readFromMemory[k * 8]), 8);
-        ESP_LOG_BUFFER_HEX("readFromMemory", &readFromMemory[k * 8], 8);
-        if (k == 10)
+        uint8_t crc_cal = dallas_crc8(&(readFromMemory[k * 8]), 7);
+        if (crc_cal != (readFromMemory[k * 8 + 7]))
         {
-            uint8_t crc_cal = dallas_crc8(&(readFromMemory[k * 8]), 1);
-            if (crc_cal != (readFromMemory[k * 8 + 1]))
-            {
-                printf("corrupted data %d crc_calc:%02X crc_mem: %02X, trying again\r\n", k,
-                       crc_cal, readFromMemory[k * 8 + 1]);
-            }
+            printf("corrupted data %d crc_calc:%02X crc_mem: %02X, trying again\r\n", k,
+                   crc_cal, readFromMemory[k * 8 + 7]);
+            k--;
+            count++;
+            vTaskDelay(pdMS_TO_TICKS(3000));
         }
-        else
+        if (count >= 5)
         {
-            uint8_t crc_cal = dallas_crc8(&(readFromMemory[k * 8]), 7);
-            if (crc_cal != (readFromMemory[k * 8 + 7]))
-            {
-                printf("corrupted data %d crc_calc:%02X crc_mem: %02X, trying again\r\n", k,
-                       crc_cal, readFromMemory[k * 8 + 7]);
-                k--;
-                count++;
-                vTaskDelay(pdMS_TO_TICKS(3000));
-            }
-            if (count >= 5)
-            {
-                printf("\r\n**********JIGA ISCA OTP FAIL CRC**********\r\n");
-                break;
-            }
+            printf("\r\n**********JIGA ISCA OTP FAIL CRC**********\r\n");
+            break;
         }
     }
 
-    for (int i = 0; i < 82; i++)
+    for (int i = 0; i < 88; i++)
     {
         if (otpCrc[i] != readFromMemory[i])
             printf("\r\n**********JIGA ISCA OTP FAILED TO READ 0x%02X != 0x%02X**********\r\n", otpCrc[i], readFromMemory[i]);
