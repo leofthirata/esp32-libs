@@ -766,6 +766,7 @@ void stateTask (void* pvParameters)
                                 {
                                     printf("\r\n**********JIGA ISCA LORA DONE**********\r\n");
                                     m_isca->jiga.canSendP2P = false;
+                                    m_isca->jiga.loraDone = true;
                                 }
 
                             }

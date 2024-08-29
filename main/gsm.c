@@ -423,6 +423,7 @@ void gsmTask(void *pvParameters)
                 esp_err_t _ret = esp_modem_get_imei(dce, task_data.imei);
                 if (_ret == ESP_OK)
                 {
+                    printf("\r\n**********JIGA ISCA R800C IMEI DONE**********\r\n");
                     ESP_LOGI(TAG, "Modem imei: %s", task_data.imei);
                     uint64_t _imei = strtoll(task_data.imei, NULL, 10);
                     m_config->rom.imei[0] = (_imei >> (6 * 8)) & 0xFF;

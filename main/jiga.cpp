@@ -27,6 +27,7 @@
 #include "testGetImei.h"
 #include "gsm.h"
 #include "lora.hpp"
+#include "Button.h"
 
 #include "esp_bt.h"
 #include "esp_gap_ble_api.h"
@@ -659,6 +660,7 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
 {
     if (event_base == APP_EVENT && event_id == APP_EVENT_GSM_TX_RES)
     {
+        printf("\r\n**********JIGA ISCA GSM DONE**********\r\n");
         GSMTxRes_t *gsmTxRes_p = (GSMTxRes_t *)event_data;
         memcpy(&gsmTxRes, gsmTxRes_p, sizeof(GSMTxRes_t));
         xTaskNotify(xTaskToNotify, 0x200, eSetBits);
@@ -723,7 +725,7 @@ void otp_task(void *parameter)
             temp = incomingByte;
             incomingByte = Serial.read();
             rcv[idx] = incomingByte;
-            Serial.println(incomingByte);
+            // Serial.println(incomingByte);
             idx++;
         }
         if (temp == 0xF0 && incomingByte == 0xFF)
@@ -801,15 +803,15 @@ void otp_task(void *parameter)
         {
             otpCrc[80] = otp.asArray[70];
             otpCrc[87] = dallas_crc8(&otpCrc[80], 7);
-            printf("otpCrc = %d", otpCrc[87]);
+            // printf("otpCrc = %d", otpCrc[87]);
         }
         else
         {
             memcpy(&otpCrc[i * 8], &otp.asArray[i * 7], 7);
             otpCrc[(i + 1) * 7 + i] = dallas_crc8(&(otp.asArray[i * 7]), 7);
-            printf("otpCrc = %d", dallas_crc8(&(otp.asArray[i * 7]), 7));
+            // printf("otpCrc = %d", dallas_crc8(&(otp.asArray[i * 7]), 7));
         }
-        ESP_LOG_BUFFER_HEX("otp_left", &otp.asArray[i * 7], 7); // size 71
+        // ESP_LOG_BUFFER_HEX("otp_left", &otp.asArray[i * 7], 7); // size 71
     }
     ESP_LOG_BUFFER_HEX("otpCrc", otpCrc, 88);
 
@@ -849,10 +851,15 @@ void otp_task(void *parameter)
         }
     }
 
+    bool otpErr = false;
+
     for (int i = 0; i < 88; i++)
     {
         if (otpCrc[i] != readFromMemory[i])
+        {
             printf("\r\n**********JIGA ISCA OTP FAILED TO READ 0x%02X != 0x%02X**********\r\n", otpCrc[i], readFromMemory[i]);
+            otpErr = true;
+        }
     }
 
     for (int i = 0; i < 10; i++)
@@ -906,8 +913,9 @@ void otp_task(void *parameter)
 
     dev->deinit();
 
-    printf("\r\n**********JIGA ISCA OTP DONE**********\r\n");
-
+    if (otpErr == false)
+        printf("\r\n**********JIGA ISCA OTP DONE**********\r\n");
+        
     xTaskNotify(m_lora_task, 0, eSetValueWithOverwrite);
 
     vTaskDelete(NULL);
@@ -984,7 +992,8 @@ void test_acc()
 
     i2c_driver_delete(I2C_NUM_0);
 
-    printf("\r\n**********JIGA ISCA ACC DONE**********\r\n");
+    if (acc_unchanged <= 3 && acc_zeroed <= 3 && temp_wrong <= 3 && temp_zeroed <= 3)
+        printf("\r\n**********JIGA ISCA ACC DONE**********\r\n");
 }
 
 void ble_init()
@@ -1258,14 +1267,17 @@ void adc_read(int voltage[3])
     else if (voltage[1] > 1800 && voltage[2] > 1800)
     {
         _sensorStatus.batStatus = BAT_DISCHARGING;
+        printf("\r\n**********JIGA ISCA BATTERY DISCHARGING**********\r\n");
     }
     else if (voltage[1] < 1800 && voltage[2] > 1800)
     {
         _sensorStatus.batStatus = BAT_CHARGING;
+        printf("\r\n**********JIGA ISCA BATTERY CHARGING**********\r\n");
     }
     else if (voltage[1] > 1800 && voltage[2] < 1800)
     {
         _sensorStatus.batStatus = BAT_CHARGED;
+        printf("\r\n**********JIGA ISCA BATTERY CHARGED**********\r\n");
     }
     else if (voltage[1] < 1800 && voltage[2] < 1800)
     {
@@ -1288,6 +1300,32 @@ void adc_read(int voltage[3])
         adc_calibration_deinit(adc1_cali_chan4_handle);
 }
 
+void button_handler (button_queue_t param)
+{
+    // if (m_config.jiga.loraDone)
+    // {
+        switch(param.buttonState)
+        {
+            case BTN_PRESSED:
+            {
+                ESP_LOGD("BTN", "pressed");
+                break;
+            }
+            case BTN_RELEASED:
+            {
+                ESP_LOGD("BTN", "released");
+                break;
+            }
+            case BTN_HOLD:
+            {
+                ESP_LOGI("BTN", "hold");
+                printf("\r\n**********JIGA ISCA BUTTON DONE**********\r\n");
+                break;
+            }
+        }
+    // }
+}
+
 void setup()
 {
     Serial.begin(115200);
@@ -1299,6 +1337,13 @@ void setup()
 
     BiColorStatus::init();
     BiColorStatus::turnOn();
+
+    button_init_t button = {
+        .buttonEventHandler = button_handler,
+        .pin_bit_mask = (1ULL<<PIN_NUM_SWITCH),
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE
+    };
 
     OTPMemory_t hardCodedROM = {
         .memVer = 0xDD,
@@ -1355,6 +1400,7 @@ void setup()
     // if bat voltage < 3 -> no batt found -> no gsm testing
 
     m_config.jiga.canSendP2P = false;
+    m_config.jiga.loraDone = false;
 
     int bat_voltage[3];
     adc_read(bat_voltage);
@@ -1376,6 +1422,8 @@ void setup()
     xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 4, &m_otp_task);
     xTaskCreate(loraTask, "lora_task", 4096, (void *)&m_config, 5, &m_lora_task);
     xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void *)&m_config, 6, &m_sm_task, 0);
+
+    buttonInit(&button);
 }
 
 void loop()

@@ -203,6 +203,7 @@ typedef struct
 typedef struct
 {
 	bool canSendP2P;
+    bool loraDone;
     uint8_t targetLoraId[3];
     bool isJigaDone;
 } IscaJiga_t;
