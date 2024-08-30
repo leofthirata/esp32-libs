@@ -1404,14 +1404,14 @@ void setup()
 
     int bat_voltage[3];
     adc_read(bat_voltage);
+    adc_read(bat_voltage);
+    adc_read(bat_voltage);
+
     if (bat_voltage[0] * 2 > 3300)
         printf("\r\n**********JIGA ISCA BATTERY FOUND**********\r\n");
     else
         printf("\r\n**********JIGA ISCA BATTERY NOT FOUND**********\r\n");
-
-    adc_read(bat_voltage);
-    adc_read(bat_voltage);
-
+        
     test_acc();
     serial_receive_gsm_port();
     ble_init();

@@ -1106,8 +1106,8 @@ void stateTask (void* pvParameters)
                     mbedtls_base64_encode((unsigned char *)gsmTxRes.base64, sizeof(gsmTxRes.base64), &encodedLen, (unsigned char *)hexArray, hexArrayLen);
                     uint32_t id;
                     gsmTxRes.base64[gsmTxRes.size] = 0x00;
-                    esp_err_t err = storage_gsm_save_position(gsmTxRes.base64, &id);
-                    ESP_LOGW(TAG, "Store GSM_POS status [%d] %s -> [%ld] %s", err, esp_err_to_name(err), id, gsmTxRes.base64);
+                    // esp_err_t err = storage_gsm_save_position(gsmTxRes.base64, &id);
+                    // ESP_LOGW(TAG, "Store GSM_POS status [%d] %s -> [%ld] %s", err, esp_err_to_name(err), id, gsmTxRes.base64);
                 }
                 else
                 {
