@@ -488,6 +488,7 @@ void loraTask(void* param)
 					}
 					payload[p2pElement.payload.size * 3] = 0x00;
 					ESP_LOGI(TAG, "P2P SENT: %s", payload);
+                    config->jiga.p2pCounter++;
 
 					state = LORA_SM_WAIT_FOR_TIMEOUT;
 				}
@@ -589,7 +590,7 @@ void loraTask(void* param)
 
 				esp_event_post(APP_EVENT, APP_EVENT_LRW_TX_RES, (void*)&elementTxDone, sizeof(LoRaLRWTxRes_t), 0);
 
-				ESP_LOGI(TAG, "UpLinkCounter: %ld | Channel: %d | Lenght: %d", 
+				ESP_LOGI(TAG, "UpLinkCounter: %ld | Channel: %d | Length: %d", 
 					lorawanTXParams.UpLinkCounter, lorawanTXParams.channel, lorawanTXParams.PktLen);
 				
 				state_prev = LORA_SM_LRW_TX_DONE;
@@ -598,6 +599,7 @@ void loraTask(void* param)
 				break;
 			
 			case LORA_SM_P2P_RX_TIMEOUT:
+                printf("\r\n**********JIGA ISCA LORA RX TIMEOUT**********\r\n");
 				state_prev = LORA_SM_P2P_RX_TIMEOUT;
 				state = LORA_SM_WAIT_FOR_SEND;
 

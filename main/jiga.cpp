@@ -660,7 +660,6 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
 {
     if (event_base == APP_EVENT && event_id == APP_EVENT_GSM_TX_RES)
     {
-        printf("\r\n**********JIGA ISCA GSM DONE**********\r\n");
         GSMTxRes_t *gsmTxRes_p = (GSMTxRes_t *)event_data;
         memcpy(&gsmTxRes, gsmTxRes_p, sizeof(GSMTxRes_t));
         xTaskNotify(xTaskToNotify, 0x200, eSetBits);
@@ -1300,10 +1299,10 @@ void adc_read(int voltage[3])
         adc_calibration_deinit(adc1_cali_chan4_handle);
 }
 
-void button_handler (button_queue_t param)
+void button_handler(button_queue_t param)
 {
-    // if (m_config.jiga.loraDone)
-    // {
+    if (m_config.jiga.loraDone)
+    {
         switch(param.buttonState)
         {
             case BTN_PRESSED:
@@ -1323,7 +1322,7 @@ void button_handler (button_queue_t param)
                 break;
             }
         }
-    // }
+    }
 }
 
 void setup()
@@ -1401,6 +1400,7 @@ void setup()
 
     m_config.jiga.canSendP2P = false;
     m_config.jiga.loraDone = false;
+    m_config.jiga.p2pCounter = 0;
 
     int bat_voltage[3];
     adc_read(bat_voltage);
@@ -1428,9 +1428,15 @@ void setup()
 
 void loop()
 {
-    if (m_config.jiga.canSendP2P == true)
+    if (m_config.jiga.canSendP2P == true && m_config.jiga.p2pCounter < 3)
     {
         xTaskNotify(m_sm_task, 0x04, eSetBits);
+    }
+    else if (m_config.jiga.canSendP2P == true && m_config.jiga.p2pCounter >= 3)
+    {
+        printf("\r\n**********JIGA ISCA LORA TX FAIL**********\r\n");
+        m_config.jiga.loraDone = true;
+        m_config.jiga.canSendP2P = false;
     }
     vTaskDelay(5000);
 }

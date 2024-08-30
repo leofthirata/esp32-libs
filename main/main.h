@@ -206,6 +206,7 @@ typedef struct
     bool loraDone;
     uint8_t targetLoraId[3];
     bool isJigaDone;
+    uint32_t p2pCounter;
 } IscaJiga_t;
 
 typedef struct

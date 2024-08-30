@@ -670,6 +670,8 @@ void gsmTask(void *pvParameters)
                 if (ret == ESP_OK)
                 {
                     ESP_LOGI(TAG, "OK. %s %i", name, *val);
+                    printf("\r\n**********JIGA ISCA SIM CARD OK**********\r\n");
+
                     if (strlen(name) > 0)
                     {
                         count = 0;
@@ -687,6 +689,7 @@ void gsmTask(void *pvParameters)
                 {
                     if(count++ > 10)
                     {
+                        printf("\r\n**********JIGA ISCA SIM CARD FAIL**********\r\n");
                         count = 0;
                         err2Send = ESP_FAIL;
                         state = STATE_REPORT_ERROR;
@@ -1062,15 +1065,21 @@ void gsmTask(void *pvParameters)
 
                                 if (strcmp(gsmRx.payload, gsmTxRes.base64) == 0)
                                 {
+                                    printf("\r\n**********JIGA ISCA GSM DONE**********\r\n");
                                     esp_event_post(APP_EVENT, APP_EVENT_JIGA, &gsmRx, sizeof(GSMRx_t), 0);
+                                }
+                                else
+                                {
+                                    printf("\r\n**********JIGA ISCA GSM RETRY**********\r\n");
                                 }
                                 esp_event_post(APP_EVENT, APP_EVENT_GSM_RX, &gsmRx, sizeof(GSMRx_t), 0);
                             }
                         }
                         
                     }
-                    else  if (err == ESP_ERR_TIMEOUT)
+                    else if (err == ESP_ERR_TIMEOUT)
                     {
+                        printf("\r\n**********JIGA ISCA GSM RX FAIL**********\r\n");
                         break;
                     }
 
