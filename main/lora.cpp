@@ -261,7 +261,7 @@ static void app_event_handler(void *arg, esp_event_base_t event_base,
 
 void loraTask(void* param)
 {	
-    uint32_t event = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // uint32_t event = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
 	Isca_t *config = (Isca_t*) param;
 	LoRaQueueElement_t loraQueueElement2Send = {.type = QUEUE_NONE};
@@ -279,13 +279,13 @@ void loraTask(void* param)
 
 	// Define the HW configuration between MCU and SX126x
 	hwConfig.CHIP_TYPE = SX1262_CHIP;		  // Example uses an eByte E22 module with an SX1262
-	hwConfig.PIN_LORA_RESET = PIN_NUM_LORA_RESET; // LORA RESET
-	hwConfig.PIN_LORA_NSS = PIN_NUM_LORA_NSS;	  // LORA SPI CS
-	hwConfig.PIN_LORA_SCLK = PIN_NUM_LORA_SCLK;	  // LORA SPI CLK
-	hwConfig.PIN_LORA_MISO = PIN_NUM_LORA_MISO;	  // LORA SPI MISO
-	hwConfig.PIN_LORA_DIO_1 = PIN_NUM_LORA_DIO_1; // LORA DIO_1
-	hwConfig.PIN_LORA_BUSY = PIN_NUM_LORA_BUSY;	  // LORA SPI BUSY
-	hwConfig.PIN_LORA_MOSI = PIN_NUM_LORA_MOSI;	  // LORA SPI MOSI
+	hwConfig.PIN_LORA_RESET = 21; // LORA RESET
+	hwConfig.PIN_LORA_NSS = 16;	  // LORA SPI CS
+	hwConfig.PIN_LORA_SCLK = 17;	  // LORA SPI CLK
+	hwConfig.PIN_LORA_MISO = 5;	  // LORA SPI MISO
+	hwConfig.PIN_LORA_DIO_1 = 22; // LORA DIO_1
+	hwConfig.PIN_LORA_BUSY = 23;	  // LORA SPI BUSY
+	hwConfig.PIN_LORA_MOSI = 18;	  // LORA SPI MOSI
 	hwConfig.RADIO_TXEN = PIN_NUM_RADIO_TXEN;		  // LORA ANTENNA TX ENABLE
 	hwConfig.RADIO_RXEN = PIN_NUM_RADIO_RXEN;		  // LORA ANTENNA RX ENABLE
 	hwConfig.USE_DIO2_ANT_SWITCH = true;	  // Example uses an CircuitRocks Alora RFM1262 which uses DIO2 pins as antenna control
@@ -330,7 +330,6 @@ void loraTask(void* param)
 	// Start Join procedure
 	lmh_join();
 
-    printf("\r\n**********JIGA ISCA LORA BEGIN**********\r\n");
 
     config->jiga.canSendP2P = true;
 
@@ -364,11 +363,11 @@ void loraTask(void* param)
 					xTaskNotifyWait( pdFALSE, pdFALSE, &ulNotifiedValue, xMaxBlockTime );
 				}
 
-                if (config->jiga.canSendP2P == false)
-                {
-                    xQueueReset(xQueueLoRa);
-                    vTaskDelete(NULL);
-                }
+                // if (config->jiga.canSendP2P == false)
+                // {
+                //     xQueueReset(xQueueLoRa);
+                //     vTaskDelete(NULL);
+                // }
 
 				ESP_LOGI(TAG, "flags: %03lX | free xQueueTxLoRa = %d/%d", ulNotifiedValue, uxQueueSpacesAvailable(xQueueLoRa),LORA_TX_QUEUE_SIZE);
 

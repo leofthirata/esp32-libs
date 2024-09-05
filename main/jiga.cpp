@@ -430,10 +430,11 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                     ESP_GATT_OK, &rsp);
 
-        if (!is_otp_ok)
-            gsm_send_position();
-        else
-            xTaskNotify(m_sm_task, 0x04, eSetBits);
+        xTaskNotify(m_sm_task, 0x04, eSetBits);
+        // if (!is_otp_ok)
+        //     gsm_send_position();
+        // else
+        //     xTaskNotify(m_sm_task, 0x04, eSetBits);
         // esp_event_post(APP_EVENT, APP_EVENT_SEND_POS, NULL, NULL, 0);
         break;
     }
@@ -1402,42 +1403,43 @@ void setup()
     m_config.jiga.loraDone = false;
     m_config.jiga.p2pCounter = 0;
 
-    int bat_voltage[3];
-    adc_read(bat_voltage);
-    adc_read(bat_voltage);
-    adc_read(bat_voltage);
+    // int bat_voltage[3];
+    // adc_read(bat_voltage);
+    // adc_read(bat_voltage);
+    // adc_read(bat_voltage);
 
-    if (bat_voltage[0] * 2 > 3300)
-        printf("\r\n**********JIGA ISCA BATTERY FOUND**********\r\n");
-    else
-        printf("\r\n**********JIGA ISCA BATTERY NOT FOUND**********\r\n");
+    // if (bat_voltage[0] * 2 > 3300)
+    //     printf("\r\n**********JIGA ISCA BATTERY FOUND**********\r\n");
+    // else
+    //     printf("\r\n**********JIGA ISCA BATTERY NOT FOUND**********\r\n");
         
-    test_acc();
-    serial_receive_gsm_port();
-    ble_init();
+    // test_acc();
+    // serial_receive_gsm_port();
+    // ble_init();
+    
 
     xTaskToNotify = xTaskGetCurrentTaskHandle();
-    esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
-    xTaskCreate(gsmTask, "gsm_task", 8192, (void *)&m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
-    xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 4, &m_otp_task);
+    // esp_event_handler_instance_register(APP_EVENT, ESP_EVENT_ANY_ID, &app_event_handler, nullptr, nullptr);
+    // xTaskCreate(gsmTask, "gsm_task", 8192, (void *)&m_config, uxTaskPriorityGet(NULL), &m_gsm_task);
+    // xTaskCreate(otp_task, "otp_task", 4096, (void *)&m_config, 4, &m_otp_task);
     xTaskCreate(loraTask, "lora_task", 4096, (void *)&m_config, 5, &m_lora_task);
     xTaskCreatePinnedToCore(stateTask, "stateTask", 4096, (void *)&m_config, 6, &m_sm_task, 0);
 
-    buttonInit(&button);
+    // buttonInit(&button);
 }
 
 void loop()
 {
-    if (m_config.jiga.canSendP2P == true && m_config.jiga.p2pCounter < 3)
-    {
-        xTaskNotify(m_sm_task, 0x04, eSetBits);
-    }
-    else if (m_config.jiga.canSendP2P == true && m_config.jiga.p2pCounter >= 3)
-    {
-        printf("\r\n**********JIGA ISCA LORA TX FAIL**********\r\n");
-        m_config.jiga.loraDone = true;
-        m_config.jiga.canSendP2P = false;
-    }
+    // if (m_config.jiga.canSendP2P == true && m_config.jiga.p2pCounter < 3)
+    // {
+    xTaskNotify(m_sm_task, 0x04, eSetBits);
+    // }
+    // else if (m_config.jiga.canSendP2P == true && m_config.jiga.p2pCounter >= 3)
+    // {
+    printf("\r\n**********JIGA ISCA LORA TX FAIL**********\r\n");
+    //     m_config.jiga.loraDone = true;
+    //     m_config.jiga.canSendP2P = false;
+    // }
     vTaskDelay(5000);
 }
 
