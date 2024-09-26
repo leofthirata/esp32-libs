@@ -1,0 +1,12 @@
+[submodule "lis2dw12"]
+	path = lis2dw12
+	url = git@github.com:leofthirata/lis2dw12.git
+[submodule "i2c"]
+	path = i2c
+	url = git@github.com:leofthirata/i2c.git
+[submodule "fxl6408"]
+	path = fxl6408
+	url = git@github.com:leofthirata/fxl6408.git
+[submodule "at24c02d"]
+	path = at24c02d
+	url = git@github.com:leofthirata/at24c02d.git
