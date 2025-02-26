@@ -17,6 +17,9 @@ $ sudo apt --fix-broken install (if needed)
 
 # Run docker
 $ systemctl --user start docker-desktop
+
+# Give user permissions to access USB devices
+$ sudo usermod -a -G dialout $USER
 ```
 4. Install Dev Container extension for Visual Studio Code.
 5. Reopen folder in Container.
