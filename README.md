@@ -20,6 +20,17 @@ $ systemctl --user start docker-desktop
 
 # Give user permissions to access USB devices
 $ sudo usermod -a -G dialout $USER
+
+# If the error below shows up
+docker: Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?.
+See 'docker run --help'.
+Run
+$ sudo systemctl stop docker
+$ sudo systemctl enable docker.service
+$ sudo systemctl start docker.service
+
+Or the docker.sock path is something like ~/.docker/desktop/docker.sock
+$ sudo ln -sv /var/run/docker.sock ~/.docker/desktop/docker.sock
 ```
 4. Install Dev Container extension for Visual Studio Code.
 5. Reopen folder in Container.
